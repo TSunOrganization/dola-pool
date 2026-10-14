@@ -1,7 +1,8 @@
-"""Browser-based account pool: scans accounts/ profiles, hard limit of 2 videos per account per day, mutual exclusion per account.
+"""Browser-based account pool: scans accounts/ profiles, per-account daily quota, mutual exclusion per account.
 
 v2: accounts_meta metadata table (scheduling switch/notes/login-state cache/risk-control cooldown); the panel reads and writes the same data.
 Quota counts are stored in SQLite (pool_usage.db), counted conservatively: a count is recorded only on a successful video or a credit error.
+The quota is configurable (config.DAILY_LIMIT, default 2; up to 10 with the Dola skill system) and is tracked per egress proxy, so switching the exit IP (VPN) resets an account's budget.
 """
 import asyncio
 import shutil
@@ -17,7 +18,7 @@ from video_worker_ui import (
 )
 import config
 
-DAILY_LIMIT = 2
+DAILY_LIMIT = config.DAILY_LIMIT  # videos per account per day (2 free, up to 10 with the skill system)
 COOLDOWN_SEC = 1800  # risk-control cooldown of 30 minutes
 
 
@@ -31,16 +32,20 @@ class AllAccountsQuotaBlockedError(RuntimeError):
 
 class BrowserPool:
     def __init__(self, accounts_dir: str = "accounts", db_path: str = "pool_usage.db",
-                 max_concurrency: int = 1):
+                 max_concurrency: int = 1, proxies: list[str] | None = None):
         self.accounts_dir = Path(accounts_dir)
         self.semaphore = asyncio.Semaphore(max_concurrency)
         self._locks: dict[str, asyncio.Lock] = {}
+        # Egress proxies used for IP rotation; the Dola quota is tied to the exit IP.
+        self._proxies: list[str] = list(proxies) if proxies is not None else list(config.PROXIES)
+        self._proxy_index: dict[str, int] = {}
         self._conn = sqlite3.connect(db_path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         self._conn.execute(
-            "CREATE TABLE IF NOT EXISTS usage (account TEXT, day TEXT, used INTEGER, "
-            "PRIMARY KEY(account, day))"
+            "CREATE TABLE IF NOT EXISTS usage (account TEXT, day TEXT, proxy TEXT DEFAULT '', "
+            "used INTEGER, PRIMARY KEY(account, day, proxy))"
         )
+        self._migrate_usage_table()
         self._conn.execute(
             """
             CREATE TABLE IF NOT EXISTS accounts_meta (
@@ -79,6 +84,55 @@ class BrowserPool:
             except sqlite3.OperationalError:
                 pass
 
+    def _migrate_usage_table(self):
+        """Old databases used PRIMARY KEY(account, day); add the proxy column so each egress IP keeps its own count."""
+        columns = {row[1] for row in self._conn.execute("PRAGMA table_info(usage)")}
+        if "proxy" in columns:
+            return
+        self._conn.execute("ALTER TABLE usage RENAME TO usage_old")
+        self._conn.execute(
+            "CREATE TABLE usage (account TEXT, day TEXT, proxy TEXT DEFAULT '', "
+            "used INTEGER, PRIMARY KEY(account, day, proxy))"
+        )
+        self._conn.execute(
+            "INSERT OR IGNORE INTO usage (account, day, proxy, used) "
+            "SELECT account, day, '', used FROM usage_old"
+        )
+        self._conn.execute("DROP TABLE usage_old")
+        self._conn.commit()
+
+    # ===== Egress proxy rotation =====
+
+    def _proxy_for(self, account: str) -> str | None:
+        """Return the egress proxy currently assigned to an account (None when no proxy is configured)."""
+        if not self._proxies:
+            return None
+        index = self._proxy_index.get(account, 0)
+        if index >= len(self._proxies):
+            index = 0
+        return self._proxies[index]
+
+    def _proxy_key(self, account: str) -> str:
+        return self._proxy_for(account) or ""
+
+    def _rotate_proxy(self, account: str) -> bool:
+        """Switch an account to the next egress proxy. Returns False when there is no next proxy."""
+        if len(self._proxies) <= 1:
+            return False
+        index = self._proxy_index.get(account, 0)
+        if index + 1 >= len(self._proxies):
+            return False
+        self._proxy_index[account] = index + 1
+        return True
+
+    def _clear_rate_limit(self, account: str):
+        """Clear the daily-limit mark for an account (used after rotating to a fresh egress IP)."""
+        self._conn.execute(
+            "UPDATE accounts_meta SET rate_limited_until=0, limit_reason='' WHERE name=?",
+            (account,),
+        )
+        self._conn.commit()
+
     # ===== Account discovery / metadata =====
 
     def _ensure_meta(self, name: str):
@@ -103,17 +157,27 @@ class BrowserPool:
             "SELECT * FROM accounts_meta WHERE name=?", (name,)).fetchone()
 
     def used_today(self, account: str) -> int:
+        """Videos already produced today on the account's current egress proxy."""
         row = self._conn.execute(
-            "SELECT used FROM usage WHERE account=? AND day=?",
-            (account, date.today().isoformat()),
+            "SELECT used FROM usage WHERE account=? AND day=? AND proxy=?",
+            (account, date.today().isoformat(), self._proxy_key(account)),
         ).fetchone()
         return row[0] if row else 0
 
     def _claim(self, account: str):
         self._conn.execute(
-            "INSERT INTO usage(account, day, used) VALUES (?,?,1) "
-            "ON CONFLICT(account, day) DO UPDATE SET used=used+1",
-            (account, date.today().isoformat()),
+            "INSERT INTO usage(account, day, proxy, used) VALUES (?,?,?,1) "
+            "ON CONFLICT(account, day, proxy) DO UPDATE SET used=used+1",
+            (account, date.today().isoformat(), self._proxy_key(account)),
+        )
+        self._conn.commit()
+
+    def _cap_usage(self, account: str, value: int):
+        """Force today's count for the current proxy up to at least `value` (used when Dola reports the daily limit)."""
+        self._conn.execute(
+            "INSERT INTO usage(account, day, proxy, used) VALUES (?,?,?,?) "
+            "ON CONFLICT(account, day, proxy) DO UPDATE SET used=MAX(used, excluded.used)",
+            (account, date.today().isoformat(), self._proxy_key(account), value),
         )
         self._conn.commit()
 
@@ -148,11 +212,7 @@ class BrowserPool:
 
     def _mark_daily_limit(self, account: str, reason: str = ""):
         """Dola explicitly returned the daily limit: cap the count and mark it until the reset time, skipping this account entirely in the meantime."""
-        self._conn.execute(
-            "INSERT INTO usage(account, day, used) VALUES (?,?,?) "
-            "ON CONFLICT(account, day) DO UPDATE SET used=MAX(used, excluded.used)",
-            (account, date.today().isoformat(), DAILY_LIMIT),
-        )
+        self._cap_usage(account, DAILY_LIMIT)
         self._conn.execute(
             "UPDATE accounts_meta SET last_used_at=?, rate_limited_until=?, limit_reason=? WHERE name=?",
             (time.time(), self._next_limit_reset(), reason[:300], account),
@@ -170,6 +230,8 @@ class BrowserPool:
             lock = self._locks.get(a)
             out.append({
                 "name": a,
+                "proxy": self._proxy_for(a),
+                "proxy_index": self._proxy_index.get(a, 0),
                 "scheduling": bool(m["scheduling"]) if m else True,
                 "note": m["note"] if m else "",
                 "email": m["email"] if m else "",
@@ -306,7 +368,8 @@ class BrowserPool:
                     self._set_credit_balance(account, balance, source)
                 try:
                     result = await resume_video(account, conversation_id, timeout,
-                                                on_poll=on_poll, on_balance=on_balance)
+                                                on_poll=on_poll, on_balance=on_balance,
+                                                proxy=self._proxy_for(account))
                     self._claim(account)
                     self._conn.execute(
                         "UPDATE accounts_meta SET last_used_at=? WHERE name=?",
@@ -321,8 +384,16 @@ class BrowserPool:
     async def generate_video(self, prompt: str, ratio: str = None, duration: int = None,
                              model: str = "seedance_v2.0", on_conversation_id=None,
                              on_poll=None, on_balance=None,
-                             reference_image_paths: list[str] | None = None) -> dict:
-        """Pick a schedulable and idle account to generate a video; automatically switch accounts on insufficient credit/risk control (risk-controlled accounts enter cooldown)."""
+                             reference_image_paths: list[str] | None = None,
+                             skill_path: str | None = None) -> dict:
+        """Pick a schedulable and idle account to generate a video.
+
+        Automatically switches accounts on insufficient credit / risk control
+        (risk-controlled accounts enter cooldown). When an account hits the Dola
+        daily limit and more than one egress proxy is configured, it rotates to
+        the next proxy instead of giving up: the quota is tied to the egress IP,
+        so a new exit IP gives the account a fresh budget.
+        """
         async with self.semaphore:
             last_err = None
             for a in self.list_accounts():
@@ -336,56 +407,68 @@ class BrowserPool:
                 async with lock:
                     if not self._schedulable(next(x for x in self.list_accounts() if x['name'] == account)):
                         continue  # state changed while waiting
-                    try:
-                        def on_balance(balance, source=""):
-                            self._set_credit_balance(account, balance, source)
+                    # Retry the same account across egress proxies; each proxy has its own daily budget.
+                    for _ in range(max(1, len(self._proxies))):
+                        try:
+                            def on_balance(balance, source=""):
+                                self._set_credit_balance(account, balance, source)
 
-                        result = await generate_video(
-                            account, prompt, ratio, duration, model=model,
-                            on_conversation_id=on_conversation_id, on_poll=on_poll,
-                            on_balance=on_balance, reference_image_paths=reference_image_paths)
-                        self._claim(account)
-                        self._conn.execute(
-                            "UPDATE accounts_meta SET last_used_at=? WHERE name=?",
-                            (time.time(), account))
-                        self._conn.commit()
-                        return result
-                    except CreditInsufficientError as e:
-                        print(f"[pool] {account} insufficient credit before generation, skipping: {e}", flush=True)
-                        self._mark_quota_blocked(account, str(e))
-                        last_err = e
-                        continue
-                    except AccountLimitedError as e:
-                        print(f"[pool] {account} reached the daily limit, switching account immediately: {e}", flush=True)
-                        self._mark_daily_limit(account, str(e))
-                        last_err = e
-                        continue
-                    except CreditError as e:
-                        print(f"[pool] {account} insufficient credit, switching account: {e}", flush=True)
-                        self._claim(account)
-                        last_err = e
-                        continue
-                    except RiskControlError as e:
-                        print(f"[pool] {account} risk control, cooling down for 30 minutes, switching account: {e}", flush=True)
-                        self._conn.execute(
-                            "UPDATE accounts_meta SET cooldown_until=? WHERE name=?",
-                            (time.time() + COOLDOWN_SEC, account))
-                        self._conn.commit()
-                        last_err = e
-                        continue
-                    except TimeoutError as e:
-                        # After the request has obtained a conversation_id, Dola may still be generating.
-                        # Never switch accounts and resubmit just because local polling timed out, or credit will be double-charged / the video produced twice.
-                        self._claim(account)
-                        self._conn.execute(
-                            "UPDATE accounts_meta SET last_used_at=? WHERE name=?",
-                            (time.time(), account))
-                        self._conn.commit()
-                        raise
-                    except FileNotFoundError as e:
-                        print(f"[pool] {account} profile missing, skipping: {e}", flush=True)
-                        last_err = e
-                        continue
+                            result = await generate_video(
+                                account, prompt, ratio, duration, model=model,
+                                on_conversation_id=on_conversation_id, on_poll=on_poll,
+                                on_balance=on_balance, reference_image_paths=reference_image_paths,
+                                skill_path=skill_path, proxy=self._proxy_for(account))
+                            self._claim(account)
+                            self._conn.execute(
+                                "UPDATE accounts_meta SET last_used_at=? WHERE name=?",
+                                (time.time(), account))
+                            self._conn.commit()
+                            return result
+                        except CreditInsufficientError as e:
+                            print(f"[pool] {account} insufficient credit before generation, skipping: {e}", flush=True)
+                            self._mark_quota_blocked(account, str(e))
+                            last_err = e
+                            break
+                        except AccountLimitedError as e:
+                            # The daily quota is tied to the egress IP: cap this proxy's count and,
+                            # if another proxy is available, rotate and retry the same account.
+                            self._cap_usage(account, DAILY_LIMIT)
+                            if self._rotate_proxy(account):
+                                print(f"[pool] {account} hit the daily limit on the current egress, "
+                                      f"rotating proxy -> {self._proxy_for(account)}", flush=True)
+                                self._clear_rate_limit(account)
+                                last_err = e
+                                continue
+                            print(f"[pool] {account} reached the daily limit, switching account immediately: {e}", flush=True)
+                            self._mark_daily_limit(account, str(e))
+                            last_err = e
+                            break
+                        except CreditError as e:
+                            print(f"[pool] {account} insufficient credit, switching account: {e}", flush=True)
+                            self._claim(account)
+                            last_err = e
+                            break
+                        except RiskControlError as e:
+                            print(f"[pool] {account} risk control, cooling down for 30 minutes, switching account: {e}", flush=True)
+                            self._conn.execute(
+                                "UPDATE accounts_meta SET cooldown_until=? WHERE name=?",
+                                (time.time() + COOLDOWN_SEC, account))
+                            self._conn.commit()
+                            last_err = e
+                            break
+                        except TimeoutError as e:
+                            # After the request has obtained a conversation_id, Dola may still be generating.
+                            # Never switch accounts and resubmit just because local polling timed out, or credit will be double-charged / the video produced twice.
+                            self._claim(account)
+                            self._conn.execute(
+                                "UPDATE accounts_meta SET last_used_at=? WHERE name=?",
+                                (time.time(), account))
+                            self._conn.commit()
+                            raise
+                        except FileNotFoundError as e:
+                            print(f"[pool] {account} profile missing, skipping: {e}", flush=True)
+                            last_err = e
+                            break
             if self.all_accounts_quota_blocked:
                 raise AllAccountsQuotaBlockedError(
                     f"429: all accounts with scheduling enabled are known to have insufficient credit: {last_err or 'no account'}"

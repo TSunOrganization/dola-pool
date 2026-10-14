@@ -161,3 +161,35 @@ async def download_reference_images(urls: list[str], task_id: str) -> tuple[Path
             child.unlink(missing_ok=True)
         root.rmdir()
         raise
+
+
+def write_skill_markdown(skill_markdown: str, task_id: str) -> Path:
+    """Write the skill markdown to a temp skill.md and return its path.
+
+    The caller is responsible for deleting the parent directory afterwards.
+    """
+    root = Path(tempfile.mkdtemp(prefix=f"dola_skill_{task_id}_"))
+    path = root / "skill.md"
+    path.write_text(skill_markdown, encoding="utf-8")
+    return path
+
+
+def default_skill_path() -> Path | None:
+    """Return the ready-made skill file (config.SKILL_FILE) when skill mode is on and the file exists."""
+    if not config.SKILL_ENABLED:
+        return None
+    path = Path(config.SKILL_FILE)
+    return path if path.exists() else None
+
+
+def resolve_skill_path(skill_markdown: str | None, task_id: str) -> tuple[Path | None, Path | None]:
+    """Return (skill_file, temp_root_to_cleanup) for a task.
+
+    An inline skill_markdown is written to a temporary skill.md (the caller must
+    delete `temp_root`). Otherwise the ready-made file at config.SKILL_FILE is
+    attached directly, so no copy is made and nothing needs cleaning up.
+    """
+    if skill_markdown:
+        path = write_skill_markdown(skill_markdown, task_id)
+        return path, path.parent
+    return default_skill_path(), None

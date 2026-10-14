@@ -253,7 +253,7 @@ async function loadAccounts(){
       :statusBadge(x);
     const warn=(jb&&jb.status==='failed')?' <span class="tiny" title="'+esc(jb.error)+'">⚠</span>':'';
     return [
-      `<span class="account-id">${esc(x.name)}</span>`,
+      `<span class="account-id">${esc(x.name)}</span>`+(x.proxy?`<div class="tiny">${esc(x.proxy)}</div>`:''),
       accLabel(x)+warn,
       badge,
       `<label class="sw"><input type="checkbox" ${x.scheduling?'checked':''} onchange="setSched('${x.name}',this.checked)"><i></i></label>`,

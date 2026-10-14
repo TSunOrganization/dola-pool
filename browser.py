@@ -16,11 +16,13 @@ LAUNCH_ARGS = [
 ]
 
 
-async def launch_account_context(p, account: str, headless: bool = None, use_extension: bool = False):
+async def launch_account_context(p, account: str, headless: bool = None, use_extension: bool = False,
+                                 proxy: str = None):
     """Launch the accounts/<account> profile and return the BrowserContext. The caller is responsible for close.
 
     p: async_playwright() instance
     headless: None = use config.HEADLESS
+    proxy: explicit egress proxy for this launch; None = use config.PROXY
     """
     profile_dir = Path("accounts") / account
     if not profile_dir.exists():
@@ -47,8 +49,9 @@ async def launch_account_context(p, account: str, headless: bool = None, use_ext
         "locale": "ja-JP",
         "timezone_id": "Asia/Tokyo",
     }
-    if config.PROXY:
-        kwargs["proxy"] = {"server": config.PROXY}
+    chosen_proxy = config.PROXY if proxy is None else proxy
+    if chosen_proxy:
+        kwargs["proxy"] = {"server": chosen_proxy}
     return await p.chromium.launch_persistent_context(str(profile_dir), **kwargs)
 
 

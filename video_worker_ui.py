@@ -140,9 +140,16 @@ async def _fetch_bytes(url: str) -> bytes:
 
 
 
-async def attach_reference_images(page, image_paths: list[str]) -> None:
-    """Upload reference images through Dola's native file input and wait for prepare_upload/TOS to complete."""
-    if not image_paths:
+async def attach_reference_images(page, image_paths: list[str],
+                                  extra_files: list[str] | None = None) -> None:
+    """Upload reference images and any extra files (e.g. skill.md) through Dola's native file input.
+
+    Waits for prepare_upload/TOS to complete for every uploaded file.
+    """
+    image_paths = list(image_paths or [])
+    extra_files = list(extra_files or [])
+    paths = image_paths + extra_files
+    if not paths:
         return
     file_input = page.locator('input[type="file"]').first
     await file_input.wait_for(state="attached", timeout=10000)
@@ -155,19 +162,21 @@ async def attach_reference_images(page, image_paths: list[str]) -> None:
 
     page.on("response", on_response)
     try:
-        await file_input.set_input_files(image_paths)
-        expected = len(image_paths)
+        await file_input.set_input_files(paths)
+        expected = len(paths)
+        expected_thumbs = len(image_paths)
         deadline = time.time() + max(60, expected * 20)
         while time.time() < deadline:
             prepare_count = sum("/alice/resource/prepare_upload" in url and 200 <= status < 300
                                 for status, url in events)
             tos_count = sum("/upload/v1/" in url and 200 <= status < 300
                             for status, url in events)
-            # Only allow sending once the thumbnail appears and every prepare/TOS succeeded.
+            # Only allow sending once the image thumbnails appear (images only) and every prepare/TOS succeeded.
             thumb_count = await page.locator('img[alt]').count()
-            if prepare_count >= expected and tos_count >= expected and thumb_count >= expected:
+            if prepare_count >= expected and tos_count >= expected and thumb_count >= expected_thumbs:
                 await page.wait_for_timeout(800)
-                print(f"[upload] reference images uploaded: {expected} image(s)", flush=True)
+                print(f"[upload] uploaded {expected} file(s) "
+                      f"({expected_thumbs} image(s) + {len(extra_files)} extra)", flush=True)
                 return
             await page.wait_for_timeout(250)
         raise TimeoutError(
@@ -333,10 +342,11 @@ async def poll_conversation(account: str, page, context, conversation_id: str,
 
 
 async def resume_video(account: str, conversation_id: str, timeout: int,
-                       on_poll=None, on_balance=None) -> dict:
+                       on_poll=None, on_balance=None, proxy: str | None = None) -> dict:
     """Resume an already-accepted conversation after a service restart, without resending the prompt."""
     async with async_playwright() as p:
-        context = await launch_account_context(p, account, headless=False, use_extension=True)
+        context = await launch_account_context(p, account, headless=False, use_extension=True,
+                                               proxy=proxy)
         try:
             page = context.pages[0] if context.pages else await context.new_page()
             await page.goto(f"https://www.dola.com/chat/{conversation_id}",
@@ -351,10 +361,14 @@ async def generate_video(account: str, prompt: str, ratio: str = None,
                          duration: int = None, timeout: int = None,
                          model: str = "seedance_v2.0", use_extension: bool = True,
                          on_conversation_id=None, on_poll=None, on_balance=None,
-                         reference_image_paths: list[str] | None = None) -> dict:
+                         reference_image_paths: list[str] | None = None,
+                         skill_path: str | None = None,
+                         proxy: str | None = None) -> dict:
     """Full generation flow (UI flow). Returns {"video_url","local_path","conversation_id","account"}.
 
     ratio/duration: None = use the UI defaults (currently 10s).
+    skill_path: local path to a skill.md attached together with the prompt (Dola skill system).
+    proxy: explicit egress proxy for this launch; None = use config.PROXY.
     Exceptions: RiskControlError (slider failed 3 times), CreditError (insufficient credit), TimeoutError.
     """
     timeout = timeout or config.VIDEO_TIMEOUT
@@ -377,7 +391,7 @@ async def generate_video(account: str, prompt: str, ratio: str = None,
     async with async_playwright() as p:
         context = await launch_account_context(
             p, account, headless=False if use_extension else None,
-            use_extension=use_extension)
+            use_extension=use_extension, proxy=proxy)
         try:
             page = context.pages[0] if context.pages else await context.new_page()
             await page.goto("https://www.dola.com/chat", timeout=60000, wait_until="domcontentloaded")
@@ -389,8 +403,10 @@ async def generate_video(account: str, prompt: str, ratio: str = None,
             # ---- UI send ----
             await page.click(VIDEO_BTN)
             await page.wait_for_timeout(1500)
-            if reference_image_paths:
-                await attach_reference_images(page, reference_image_paths)
+            if reference_image_paths or skill_path:
+                await attach_reference_images(
+                    page, reference_image_paths or [],
+                    extra_files=[skill_path] if skill_path else None)
             # Select the model. Extension/current web-UI labels: モデル 2.0高速, モデル 2.5.
             try:
                 current_model = None
