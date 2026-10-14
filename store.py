@@ -48,6 +48,7 @@ class TaskStore:
                     last_poll_at REAL,
                     failure_code TEXT,
                     reference_images TEXT,
+                    skill_markdown TEXT,
                     api_key_hash TEXT,
                     api_key_name TEXT,
                     started_at REAL,
@@ -64,6 +65,7 @@ class TaskStore:
                 ("last_poll_at", "REAL"),
                 ("failure_code", "TEXT"),
                 ("reference_images", "TEXT"),
+                ("skill_markdown", "TEXT"),
                 ("api_key_hash", "TEXT"),
                 ("api_key_name", "TEXT"),
                 ("started_at", "REAL"),
@@ -148,6 +150,7 @@ class TaskStore:
         duration,
         account=None,
         reference_images=None,
+        skill_markdown=None,
         api_key_hash=None,
         api_key_name=None,
         daily_limit=0,
@@ -179,8 +182,9 @@ class TaskStore:
                 "INSERT INTO tasks ("
                 "id,model,prompt,ratio,duration,status,account,created_at,updated_at,"
                 "conversation_id,deadline_at,last_poll_at,failure_code,reference_images,"
+                "skill_markdown,"
                 "api_key_hash,api_key_name,started_at,finished_at,client_concurrency_limit"
-                ") VALUES (?,?,?,?,?,'queued',?,?,?,NULL,NULL,0,NULL,?,?,?,?,?,?)",
+                ") VALUES (?,?,?,?,?,'queued',?,?,?,NULL,NULL,0,NULL,?,?,?,?,?,?,?)",
                 (
                     task_id,
                     model,
@@ -191,6 +195,7 @@ class TaskStore:
                     now,
                     now,
                     reference_images or "[]",
+                    skill_markdown,
                     api_key_hash,
                     api_key_name,
                     None,

@@ -287,3 +287,17 @@ F:\ai\视频逆向\dola-pool\
 - Currently only `reference_images` is supported externally, up to 30 public images.
 - `reference_videos` / `reference_audios` are not supported yet, and no Dola attachment is faked for them; Dola's current video panel and generic attachment entry actually only accept images/documents, and injecting MP4/WAV did not trigger an upload request.
 - If a client sends video or audio assets, the current version should not be expected to process them; this can only be extended later once Dola's web frontend exposes a stable upload entry and a protocol probe is completed.
+
+## 21. Skill system + per-proxy quota (2026-10)
+
+Background: with the Dola **skill** system (attaching a `skill.md` together with the prompt) the Seedance 2.5 / 30s path is unlocked and an account is no longer capped at the free 2 videos/day — it can produce up to ~10. The quota is tied to the **egress IP**, so switching the VPN server / proxy resets an account's budget.
+
+- API: `VideoGenRequest` gains `skill_markdown: str | None`. `media.resolve_skill_markdown()` returns the request value, or falls back to `config.SKILL_FILE` (`DOLA_SKILL_FILE`, default `skills/skill.md`) when `DOLA_SKILL_ENABLED=1`.
+- `_run_task` writes the skill to a temporary `skill.md` (`media.write_skill_markdown`) and passes `skill_path` into `video_worker_ui.generate_video`, which attaches it through Dola's native file input together with the reference images (`attach_reference_images(..., extra_files=[skill_path])`). The temp directory is removed in `finally`.
+- `store.tasks` gains a `skill_markdown` column (with an ALTER migration) so a restart can re-attach the skill when resuming queued tasks.
+- Daily quota is now `config.DAILY_LIMIT` (`DOLA_DAILY_LIMIT`, default `2`; set `10` in skill mode) instead of the hard-coded 2.
+- `BrowserPool` tracks usage per `(account, day, proxy)`; the `usage` table is migrated in place to add the `proxy` column. Egress proxies come from `config.PROXIES` (`DOLA_PROXIES`, comma-separated; falls back to the single `DOLA_PROXY`).
+- On `AccountLimitedError` the pool caps the current proxy's count (`_cap_usage`), and if another proxy is available it rotates (`_rotate_proxy`), clears the account's rate-limit mark (`_clear_rate_limit`) and retries the **same** account on the new IP; otherwise it marks the account rate-limited and moves to the next account.
+- `browser.launch_account_context(..., proxy=...)` now accepts an explicit egress per launch; `browser_pool` passes `self._proxy_for(account)` for both generation and resume.
+- The admin panel account list shows the account's current egress proxy under its name.
+- Tests: `python3 tests/test_skill_and_rotation.py` (stubs patchright/aiohttp/OpenCV/Pillow) covers the env-configured limit, the usage-table migration, proxy rotation on limit, the single-proxy fallback, the skill helpers and skill persistence.

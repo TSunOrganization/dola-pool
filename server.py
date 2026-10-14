@@ -24,7 +24,7 @@ from pydantic import BaseModel, Field
 import config
 from add_account import add_account_flow
 from browser_pool import AllAccountsLimitedError, AllAccountsQuotaBlockedError, BrowserPool
-from media import download_reference_images, validate_reference_urls
+from media import download_reference_images, resolve_skill_markdown, validate_reference_urls, write_skill_markdown
 from store import PendingTaskLimitExceeded, TaskQuotaExceeded, TaskStore
 
 Path(config.DOWNLOAD_DIR).mkdir(parents=True, exist_ok=True)
@@ -160,6 +160,9 @@ class VideoGenRequest(BaseModel):
     duration: int | None = Field(None, ge=10, le=30)
     # Only fixed durations 10/15/30 are accepted externally; the exact set is validated in the endpoint logic.
     reference_images: list[str] = Field(default_factory=list)
+    # Dola "skill" system: attach a skill.md together with the prompt (unlocks 30s /
+    # Seedance 2.5 and the larger per-account quota). Falls back to config.SKILL_FILE.
+    skill_markdown: str | None = Field(None, max_length=200_000)
 
 
 class TaskResponse(BaseModel):
@@ -177,10 +180,12 @@ def _resolve_ratio(size, ratio):
     return ratio
 
 
-async def _run_task(task_id, model, prompt, ratio, duration, reference_images, client):
+async def _run_task(task_id, model, prompt, ratio, duration, reference_images, client,
+                    skill_markdown=None):
     api_key_hash = client.get("api_key_hash")
     acquired = False
     reference_root = None
+    skill_root = None
     try:
         await key_limiter.acquire(api_key_hash, client.get("concurrency_limit", 0))
         acquired = True
@@ -196,10 +201,15 @@ async def _run_task(task_id, model, prompt, ratio, duration, reference_images, c
 
         reference_root, reference_paths = await download_reference_images(
             reference_images or [], task_id)
+        skill_path = None
+        if skill_markdown:
+            skill_file = write_skill_markdown(skill_markdown, task_id)
+            skill_path = str(skill_file)
+            skill_root = skill_file.parent
         result = await pool.generate_video(
             prompt, ratio, duration, model,
             on_conversation_id=on_conversation_id, on_poll=on_poll,
-            reference_image_paths=reference_paths)
+            reference_image_paths=reference_paths, skill_path=skill_path)
         public_url = f"{config.PUBLIC_BASE}/videos/{Path(result['local_path']).name}"
         store.update(task_id, status="completed", video_url=public_url,
                      account=result.get("account"), last_poll_at=time.time(),
@@ -213,6 +223,8 @@ async def _run_task(task_id, model, prompt, ratio, duration, reference_images, c
     finally:
         if reference_root:
             shutil.rmtree(reference_root, ignore_errors=True)
+        if skill_root:
+            shutil.rmtree(skill_root, ignore_errors=True)
         if acquired:
             await key_limiter.release(api_key_hash)
 
@@ -281,6 +293,7 @@ async def resume_incomplete_tasks():
         asyncio.create_task(_run_task(
             row["id"], row["model"], row["prompt"], ratio, row["duration"],
             _task_reference_images(row.get("reference_images")), _task_client(row),
+            skill_markdown=row.get("skill_markdown"),
         ))
 
 
@@ -302,6 +315,7 @@ async def create_video(req: VideoGenRequest, authorization: str | None = Header(
         reference_images = await validate_reference_urls(req.reference_images)
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
+    skill_markdown = resolve_skill_markdown(req.skill_markdown)
     # When accounts are temporarily busy, allow the task to enter queued; actual queuing is handled
     # by BrowserPool's global concurrency control. Reject immediately only when it is clear that all
     # accounts have hit the daily limit / have insufficient credits.
@@ -321,6 +335,7 @@ async def create_video(req: VideoGenRequest, authorization: str | None = Header(
             ratio or "default",
             duration,
             reference_images=json.dumps(reference_images, ensure_ascii=False),
+            skill_markdown=skill_markdown,
             api_key_hash=client["api_key_hash"],
             api_key_name=client["api_key_name"],
             daily_limit=client["daily_limit"],
@@ -332,7 +347,8 @@ async def create_video(req: VideoGenRequest, authorization: str | None = Header(
     except PendingTaskLimitExceeded as exc:
         raise HTTPException(429, str(exc)) from exc
     asyncio.create_task(_run_task(
-        task_id, req.model, req.prompt, ratio, duration, reference_images, client
+        task_id, req.model, req.prompt, ratio, duration, reference_images, client,
+        skill_markdown=skill_markdown,
     ))
     return TaskResponse(id=task_id, status="queued", model=req.model, prompt=req.prompt)
 

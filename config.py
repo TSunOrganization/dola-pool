@@ -45,6 +45,14 @@ DOWNLOAD_DIR = os.getenv("DOLA_DOWNLOAD_DIR", "downloads")
 # Must be a proxy pointing to a JP/KR exit; empty = follow the system proxy (for debugging only).
 PROXY = os.getenv("DOLA_PROXY", "http://127.0.0.1:7890")
 
+# Optional list of egress proxies used to rotate the exit IP (comma-separated).
+# The per-account Dola quota is tied to the egress IP, so when an account hits
+# its daily limit we switch to the next proxy and that account gets a fresh
+# budget. Empty = keep using only the single PROXY above (no rotation).
+PROXIES = [p.strip() for p in os.getenv("DOLA_PROXIES", "").split(",") if p.strip()]
+if not PROXIES and PROXY:
+    PROXIES = [PROXY]
+
 # Whether the browser runs headless (login.py is always headed)
 HEADLESS = os.getenv("DOLA_HEADLESS", "1") == "1"
 
@@ -64,6 +72,16 @@ LIMIT_RESET_TZ = os.getenv("DOLA_LIMIT_RESET_TZ", "Asia/Tokyo")
 
 # Conservative minimum credits for the pre-generation balance check; the measured cost of Dola's current 2.5/30s is 2.
 VIDEO_REQUIRED_POINTS = int(os.getenv("DOLA_VIDEO_REQUIRED_POINTS", "2"))
+
+# Max videos generated per account per day. The free web UI allows 2; the Dola
+# "skill" system raises this to up to 10 per account, so set DOLA_DAILY_LIMIT=10
+# when running in skill mode.
+DAILY_LIMIT = int(os.getenv("DOLA_DAILY_LIMIT", "2"))
+
+# Dola "skill" system: attach a skill.md together with the prompt to unlock the
+# 30s / Seedance 2.5 path and the larger per-account quota.
+SKILL_ENABLED = os.getenv("DOLA_SKILL_ENABLED", "1") == "1"
+SKILL_FILE = os.getenv("DOLA_SKILL_FILE", "skills/skill.md")
 
 
 # Limits for downloading public reference images

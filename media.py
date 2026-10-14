@@ -161,3 +161,25 @@ async def download_reference_images(urls: list[str], task_id: str) -> tuple[Path
             child.unlink(missing_ok=True)
         root.rmdir()
         raise
+
+
+def write_skill_markdown(skill_markdown: str, task_id: str) -> Path:
+    """Write the skill markdown to a temp skill.md and return its path.
+
+    The caller is responsible for deleting the parent directory afterwards.
+    """
+    root = Path(tempfile.mkdtemp(prefix=f"dola_skill_{task_id}_"))
+    path = root / "skill.md"
+    path.write_text(skill_markdown, encoding="utf-8")
+    return path
+
+
+def resolve_skill_markdown(skill_markdown: str | None) -> str | None:
+    """Return the skill markdown to use: the request value, or the configured default file."""
+    if skill_markdown:
+        return skill_markdown
+    if config.SKILL_ENABLED:
+        default = Path(config.SKILL_FILE)
+        if default.exists():
+            return default.read_text(encoding="utf-8")
+    return None
