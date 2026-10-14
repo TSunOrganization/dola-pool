@@ -1,6 +1,6 @@
-"""检查 UI 发送的那条会话是否真的出片了。
+"""Check whether the conversation sent via the UI actually produced a video.
 
-打开 /chat，点进最新的历史会话，看有没有 <video> 或失败提示。
+Open /chat, click into the latest history conversation, and see whether there is a <video> or a failure message.
 """
 import asyncio
 import json
@@ -18,7 +18,7 @@ async def main():
         context = await launch_account_context(p, account)
         page = context.pages[0] if context.pages else await context.new_page()
 
-        # 监听网络：抓 /chat/completion 和 /im/chain/single 的状态
+        # Listen to the network: capture the status of /chat/completion and /im/chain/single
         page.on("response", lambda r: print(f"  [net] {r.status} {r.url[:100]}", flush=True)
                 if any(k in r.url for k in ("/chat/completion", "im/chain", "verify", "captcha")) else None)
 
@@ -26,10 +26,11 @@ async def main():
         await page.wait_for_timeout(6000)
         await page.screenshot(path="check_01_home.png")
 
-        # 找侧边栏历史会话（含「海边日落」的那条）
+        # Find the sidebar history conversation (the one containing "海边日落").
+        # Keep the "海边日落" literal as-is: it matches a specific existing conversation title.
         target = await page.query_selector("text=海边日落")
         if not target:
-            print("✗ 历史里没找到「海边日落」会话")
+            print("✗ Did not find the \"seaside sunset\" conversation in history")
             await context.close()
             return
         await target.click()
@@ -43,7 +44,7 @@ async def main():
             return {videos, texts: texts.slice(-15)};
         }""")
         print("videos:", json.dumps(info["videos"], ensure_ascii=False))
-        print("尾部文本:")
+        print("Tail text:")
         for t in info["texts"]:
             print("   |", t)
         await context.close()

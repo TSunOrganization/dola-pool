@@ -1,4 +1,4 @@
-"""公网参考素材下载与安全校验（当前先支持图片）。"""
+"""Downloading and security validation of public reference assets (currently only images are supported)."""
 import asyncio
 import ipaddress
 import socket
@@ -16,46 +16,46 @@ _ALLOWED_IMAGE_FORMATS = {"JPEG": ".jpg", "PNG": ".png", "WEBP": ".webp"}
 
 
 def validate_public_url(url: str) -> str:
-    """只接受公网 HTTP(S) URL，拒绝 localhost/内网/带认证信息的 URL。"""
+    """Only accept public HTTP(S) URLs; reject localhost/intranet URLs and URLs carrying credentials."""
     if not isinstance(url, str) or len(url) > 4096:
-        raise ValueError("参考图片 URL 无效")
+        raise ValueError("Invalid reference image URL")
     parsed = urlparse(url)
     if parsed.scheme.lower() not in {"http", "https"} or not parsed.hostname:
-        raise ValueError("参考图片只支持 http/https 公网 URL")
+        raise ValueError("Reference images only support public http/https URLs")
     if parsed.username or parsed.password:
-        raise ValueError("参考图片 URL 不允许携带用户名或密码")
+        raise ValueError("Reference image URL must not carry a username or password")
     host = parsed.hostname
     try:
-        # 直接 IP 与 DNS 解析结果都做 SSRF 检查；禁止回环、私网、链路本地等地址。
+        # Perform SSRF checks on both direct IPs and DNS resolution results; reject loopback, private, link-local, and similar addresses.
         addresses = {ipaddress.ip_address(host)}
     except ValueError:
         try:
             infos = awaitable_getaddrinfo(host)
             addresses = {ipaddress.ip_address(x) for x in infos}
         except Exception as exc:
-            raise ValueError(f"无法解析参考图片域名: {host}") from exc
+            raise ValueError(f"Cannot resolve reference image domain: {host}") from exc
     if not addresses or any(
         ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved
         or ip.is_multicast or ip.is_unspecified
         for ip in addresses
     ):
-        raise ValueError("参考图片 URL 指向内网或保留地址")
+        raise ValueError("Reference image URL points to an intranet or reserved address")
     return url
 
 
 def awaitable_getaddrinfo(host: str) -> list[str]:
-    """同步 DNS 解析封装；调用方在下载协程中通过 to_thread 调用。"""
+    """Synchronous DNS resolution wrapper; the caller invokes it via to_thread from the download coroutine."""
     return [item[4][0] for item in socket.getaddrinfo(host, 443, type=socket.SOCK_STREAM)]
 
 
 async def _validate_url_async(url: str) -> str:
     if not isinstance(url, str) or len(url) > 4096:
-        raise ValueError("参考图片 URL 无效")
+        raise ValueError("Invalid reference image URL")
     parsed = urlparse(url)
     if parsed.scheme.lower() not in {"http", "https"} or not parsed.hostname:
-        raise ValueError("参考图片只支持 http/https 公网 URL")
+        raise ValueError("Reference images only support public http/https URLs")
     if parsed.username or parsed.password:
-        raise ValueError("参考图片 URL 不允许携带用户名或密码")
+        raise ValueError("Reference image URL must not carry a username or password")
     host = parsed.hostname
     try:
         addresses = {ipaddress.ip_address(host)}
@@ -64,19 +64,19 @@ async def _validate_url_async(url: str) -> str:
             resolved = await asyncio.to_thread(awaitable_getaddrinfo, host)
             addresses = {ipaddress.ip_address(x) for x in resolved}
         except Exception as exc:
-            raise ValueError(f"无法解析参考图片域名: {host}") from exc
+            raise ValueError(f"Cannot resolve reference image domain: {host}") from exc
     if not addresses or any(
         ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved
         or ip.is_multicast or ip.is_unspecified
         for ip in addresses
     ):
-        raise ValueError("参考图片 URL 指向内网或保留地址")
+        raise ValueError("Reference image URL points to an intranet or reserved address")
     return url
 
 
 async def validate_reference_urls(urls: list[str]) -> list[str]:
     if len(urls) > config.REFERENCE_IMAGE_MAX_COUNT:
-        raise ValueError(f"参考图片最多 {config.REFERENCE_IMAGE_MAX_COUNT} 张")
+        raise ValueError(f"At most {config.REFERENCE_IMAGE_MAX_COUNT} reference images are allowed")
     normalized = []
     seen = set()
     for raw in urls:
@@ -90,13 +90,13 @@ async def validate_reference_urls(urls: list[str]) -> list[str]:
 async def _read_response_image(resp: aiohttp.ClientResponse) -> tuple[bytes, str]:
     content_length = resp.headers.get("Content-Length")
     if content_length and int(content_length) > config.REFERENCE_IMAGE_MAX_BYTES:
-        raise ValueError("参考图片超过单文件大小限制")
+        raise ValueError("Reference image exceeds the per-file size limit")
     chunks = []
     total = 0
     async for chunk in resp.content.iter_chunked(64 * 1024):
         total += len(chunk)
         if total > config.REFERENCE_IMAGE_MAX_BYTES:
-            raise ValueError("参考图片超过单文件大小限制")
+            raise ValueError("Reference image exceeds the per-file size limit")
         chunks.append(chunk)
     data = b"".join(chunks)
     try:
@@ -104,15 +104,15 @@ async def _read_response_image(resp: aiohttp.ClientResponse) -> tuple[bytes, str
             image.verify()
             fmt = image.format
     except Exception as exc:
-        raise ValueError("参考文件不是有效图片") from exc
+        raise ValueError("Reference file is not a valid image") from exc
     if fmt not in _ALLOWED_IMAGE_FORMATS:
-        raise ValueError("参考图片仅支持 JPEG、PNG、WEBP")
+        raise ValueError("Reference images only support JPEG, PNG, WEBP")
     return data, _ALLOWED_IMAGE_FORMATS[fmt]
 
 
 async def download_one_image(session: aiohttp.ClientSession, url: str, dest: Path) -> Path:
     current = await _validate_url_async(url)
-    # 公网素材优先尝试代理；部分 CDN/图片站拒绝代理出口，再直连回退。
+    # Try the proxy first for public assets; some CDNs/image sites reject the proxy exit, so fall back to a direct connection.
     proxies = []
     if config.PROXY:
         proxies.append(config.PROXY)
@@ -133,7 +133,7 @@ async def download_one_image(session: aiohttp.ClientSession, url: str, dest: Pat
                         current = await _validate_url_async(urljoin(current, resp.headers["Location"]))
                         continue
                     if resp.status != 200:
-                        raise ValueError(f"参考图片下载失败 HTTP {resp.status}")
+                        raise ValueError(f"Reference image download failed HTTP {resp.status}")
                     data, suffix = await _read_response_image(resp)
                     path = dest.with_suffix(suffix)
                     path.write_bytes(data)
@@ -141,11 +141,11 @@ async def download_one_image(session: aiohttp.ClientSession, url: str, dest: Pat
             except Exception as exc:
                 last_error = exc
                 break
-    raise ValueError(str(last_error) if last_error else "参考图片下载失败")
+    raise ValueError(str(last_error) if last_error else "Reference image download failed")
 
 
 async def download_reference_images(urls: list[str], task_id: str) -> tuple[Path | None, list[str]]:
-    """下载图片到临时目录，返回 (目录, 本地路径列表)。调用方负责 cleanup。"""
+    """Download images to a temporary directory and return (directory, list of local paths). The caller is responsible for cleanup."""
     urls = await validate_reference_urls(urls)
     if not urls:
         return None, []

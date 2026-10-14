@@ -1,4 +1,4 @@
-"""dola-pool 配置：全部走环境变量，带默认值。"""
+"""dola-pool configuration: everything goes through environment variables, with defaults."""
 import os
 from pathlib import Path
 
@@ -20,56 +20,56 @@ _load_local_env()
 HOST = os.getenv("DOLA_HOST", "0.0.0.0")
 PORT = int(os.getenv("DOLA_PORT", "8000"))
 
-# 服务对外 API Key（逗号分隔多个；留空 = 不鉴权，仅内网调试用）
+# Service-facing API keys (comma-separated for multiple; empty = no auth, for intranet debugging only)
 API_KEYS = [k.strip() for k in os.getenv("DOLA_API_KEYS", "").split(",") if k.strip()]
 
-# 号池 cookie 文件（一行一个 dola.com cookie）
+# Account pool cookie file (one dola.com cookie per line)
 COOKIES_FILE = os.getenv("DOLA_COOKIES_FILE", "cookies.txt")
 
-# 同时跑的视频任务上限（控制并发，防风控 / 防同号并发）
+# Max number of concurrent video tasks (controls concurrency, avoids anti-bot triggers / same-account concurrency)
 MAX_CONCURRENCY = int(os.getenv("DOLA_MAX_CONCURRENCY", "3"))
 
-# 全局待处理任务上限（queued + processing），0 = 不限制。
+# Global limit on pending tasks (queued + processing), 0 = unlimited.
 MAX_PENDING_TASKS = int(os.getenv("DOLA_MAX_PENDING_TASKS", "100"))
 
-# 视频生成超时（秒）
+# Video generation timeout (seconds)
 VIDEO_TIMEOUT = int(os.getenv("DOLA_VIDEO_TIMEOUT", "300"))
 
-# SQLite 任务库
+# SQLite task database
 DB_PATH = os.getenv("DOLA_DB_PATH", "tasks.db")
 
-# 视频下载目录（出片后下载转存，FastAPI 以静态文件方式对外提供）
+# Video download directory (videos are downloaded and stored here after generation; FastAPI serves them as static files)
 DOWNLOAD_DIR = os.getenv("DOLA_DOWNLOAD_DIR", "downloads")
 
-# 浏览器显式代理（P0 结论：不能依赖系统代理，Clash 规则变化会把 dola 分流到直连被墙）。
-# 必须是指向 JP/KR 出口的代理；留空 = 跟随系统代理（仅调试用）。
+# Explicit browser proxy (P0 finding: cannot rely on the system proxy; changes to Clash rules route dola to a direct connection that gets blocked).
+# Must be a proxy pointing to a JP/KR exit; empty = follow the system proxy (for debugging only).
 PROXY = os.getenv("DOLA_PROXY", "http://127.0.0.1:7890")
 
-# 浏览器是否无头运行（login.py 永远有头）
+# Whether the browser runs headless (login.py is always headed)
 HEADLESS = os.getenv("DOLA_HEADLESS", "1") == "1"
 
-# 对外返回视频 URL 的基址（FastAPI 静态文件服务）
+# Base URL for the returned video URL (FastAPI static file service)
 PUBLIC_BASE = os.getenv("DOLA_PUBLIC_BASE", f"http://127.0.0.1:{PORT}")
 
-# 管理面板密码（留空 = 面板不鉴权，开发模式）
+# Admin panel password (empty = panel has no auth, development mode)
 ADMIN_KEY = os.getenv("DOLA_ADMIN_KEY", "")
 
 
-# Dola 30 秒/无水印 Chromium 扩展（unpacked extension）
+# Dola 30-second/watermark-free Chromium extension (unpacked extension)
 EXTENSION_DIR = os.getenv("DOLA_EXTENSION_DIR", "extensions/dola30")
 EXTENSION_ENABLED = os.getenv("DOLA_EXTENSION_ENABLED", "1") == "1"
 
-# Dola 每日限流恢复时区；默认按日本日期零点恢复。
+# Timezone for the Dola daily rate-limit reset; defaults to resetting at midnight Japan time.
 LIMIT_RESET_TZ = os.getenv("DOLA_LIMIT_RESET_TZ", "Asia/Tokyo")
 
-# 生成前余额预检的保守最低积分；Dola 当前 2.5/30s 实测成本为 2。
+# Conservative minimum credits for the pre-generation balance check; the measured cost of Dola's current 2.5/30s is 2.
 VIDEO_REQUIRED_POINTS = int(os.getenv("DOLA_VIDEO_REQUIRED_POINTS", "2"))
 
 
-# 公网参考图片下载限制
+# Limits for downloading public reference images
 REFERENCE_IMAGE_MAX_BYTES = int(os.getenv("DOLA_REFERENCE_IMAGE_MAX_BYTES", str(15 * 1024 * 1024)))
 REFERENCE_DOWNLOAD_TIMEOUT = int(os.getenv("DOLA_REFERENCE_DOWNLOAD_TIMEOUT", "60"))
 REFERENCE_IMAGE_MAX_COUNT = int(os.getenv("DOLA_REFERENCE_IMAGE_MAX_COUNT", "30"))
 
-# 带参考图片的任务给 Dola 更长的异步生成窗口（秒）。
+# Give tasks with reference images a longer asynchronous generation window for Dola (seconds).
 REFERENCE_VIDEO_TIMEOUT = int(os.getenv("DOLA_REFERENCE_VIDEO_TIMEOUT", "900"))

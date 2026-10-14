@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>dola-pool 管理面板</title>
+<title>dola-pool Admin Panel</title>
 <style>
 :root{--bg:#f2f5f4;--card:#fff;--line:#e5e9e8;--text:#1f2a28;--sub:#7a8a86;--accent:#00a870;--accent-d:#008e5d;--red:#e5484d;--orange:#f59e0b;--blue:#3b82f6;--gray:#9aa8a4}
 *{box-sizing:border-box;margin:0;padding:0}
@@ -76,58 +76,58 @@ td .prompt{display:block;max-width:340px;overflow:hidden;text-overflow:ellipsis;
 <body>
 <div id="loginMask" class="mask" style="display:none">
   <div class="box">
-    <h2>管理面板登录</h2>
-    <input id="loginKey" type="password" placeholder="管理员密码" onkeydown="if(event.key==='Enter')submitLogin()">
-    <div class="err" id="loginErr">密码错误</div>
-    <button class="btn btn-p" onclick="submitLogin()">登录</button>
+    <h2>Admin Panel Login</h2>
+    <input id="loginKey" type="password" placeholder="Admin password" onkeydown="if(event.key==='Enter')submitLogin()">
+    <div class="err" id="loginErr">Incorrect password</div>
+    <button class="btn btn-p" onclick="submitLogin()">Sign in</button>
   </div>
 </div>
 
 <header>
-  <div class="brand"><span class="dot"></span>dola-pool 管理面板</div>
+  <div class="brand"><span class="dot"></span>dola-pool Admin Panel</div>
   <div class="head-r">
-    <label><input type="checkbox" id="autoCk" checked onchange="autoRefresh=this.checked">自动刷新</label>
+    <label><input type="checkbox" id="autoCk" checked onchange="autoRefresh=this.checked">Auto refresh</label>
     <span id="lastUpdate"></span>
-    <button class="btn" onclick="refresh()">刷新</button>
-    <button class="btn" onclick="logout()" title="清除面板密码">注销</button>
+    <button class="btn" onclick="refresh()">Refresh</button>
+    <button class="btn" onclick="logout()" title="Clear panel password">Sign out</button>
   </div>
 </header>
 
 <nav>
-  <button class="on" data-tab="dash" onclick="switchTab('dash')">仪表盘</button>
-  <button data-tab="accounts" onclick="switchTab('accounts')">账号管理</button>
-  <button data-tab="tasks" onclick="switchTab('tasks')">任务列表</button>
-  <button data-tab="keys" onclick="switchTab('keys')">API 密钥</button>
+  <button class="on" data-tab="dash" onclick="switchTab('dash')">Dashboard</button>
+  <button data-tab="accounts" onclick="switchTab('accounts')">Accounts</button>
+  <button data-tab="tasks" onclick="switchTab('tasks')">Tasks</button>
+  <button data-tab="keys" onclick="switchTab('keys')">API Keys</button>
 </nav>
 
 <main>
   <section id="tab-dash">
     <div class="cards" id="statCards"></div>
-    <div class="card"><h3>近 7 日出片趋势</h3><div class="chart" id="chart"></div></div>
-    <div class="card"><h3>号池概况</h3><div id="perAccount"></div></div>
+    <div class="card"><h3>Last 7 days output trend</h3><div class="chart" id="chart"></div></div>
+    <div class="card"><h3>Account pool overview</h3><div id="perAccount"></div></div>
   </section>
 
   <section id="tab-accounts" style="display:none">
     <div class="card">
       <div class="toolbar">
-        <h3 style="margin:0">账号列表</h3>
-        <button class="btn btn-p" onclick="openAddAccount()">＋ 添加账号</button>
+        <h3 style="margin:0">Account list</h3>
+        <button class="btn btn-p" onclick="openAddAccount()">＋ Add account</button>
       </div>
       <div id="accountsTable"></div>
     </div>
   </section>
 
   <section id="tab-tasks" style="display:none">
-    <div class="card"><h3>任务列表（最近 50 条）</h3><div id="tasksTable"></div></div>
+    <div class="card"><h3>Task list (latest 50)</h3><div id="tasksTable"></div></div>
   </section>
 
   <section id="tab-keys" style="display:none">
     <div class="card">
       <div class="toolbar">
-        <h3 style="margin:0">API 密钥</h3>
-        <button class="btn btn-p" onclick="openCreateKey()">＋ 创建密钥</button>
+        <h3 style="margin:0">API Keys</h3>
+        <button class="btn btn-p" onclick="openCreateKey()">＋ Create key</button>
       </div>
-      <div class="hint" style="margin-bottom:12px">每个 Key 可独立设置每日额度、并发数和允许时长；0 表示不限。环境变量里的 key 始终有效、不在此列表。</div>
+      <div class="hint" style="margin-bottom:12px">Each key can have its own daily quota, concurrency and allowed durations; 0 means unlimited. Keys from environment variables are always valid and are not shown in this list.</div>
       <div id="keysTable"></div>
     </div>
   </section>
@@ -136,9 +136,9 @@ td .prompt{display:block;max-width:340px;overflow:hidden;text-overflow:ellipsis;
 <div id="dlg" class="dialog" style="display:none"><div class="box" id="dlgBox"></div></div>
 <div id="videoModal" class="dialog" style="display:none">
   <div class="box" style="width:640px">
-    <h2>视频预览</h2>
+    <h2>Video preview</h2>
     <video id="videoEl" controls autoplay style="width:100%;border-radius:8px"></video>
-    <div class="row"><button class="btn" onclick="closeVideo()">关闭</button></div>
+    <div class="row"><button class="btn" onclick="closeVideo()">Close</button></div>
   </div>
 </div>
 
@@ -182,74 +182,74 @@ function switchTab(t){
 
 async function refresh(){
   if(q('#loginMask').style.display!=='none')return;
-  q('#lastUpdate').textContent='更新于 '+new Date().toLocaleTimeString();
+  q('#lastUpdate').textContent='Updated at '+new Date().toLocaleTimeString();
   try{
     if(curTab==='dash')await loadDash();
     else if(curTab==='accounts')await loadAccounts();
     else if(curTab==='tasks')await loadTasks();
     else if(curTab==='keys')await loadKeys();
-  }catch(e){if(e.message!=='unauthorized'){/* 静默 */}}
+  }catch(e){if(e.message!=='unauthorized'){/* silent */}}
 }
 
-/* ---- 仪表盘 ---- */
+/* ---- Dashboard ---- */
 async function loadDash(){
   const st=await api('/api/admin/stats');
   const sr=st.success_rate==null?'—':(st.success_rate*100).toFixed(0)+'%';
   q('#statCards').innerHTML=`
-    <div class="stat s1"><div class="v">${st.today_completed}</div><div class="l">今日出片</div></div>
-    <div class="stat s2"><div class="v">${st.today_failed}</div><div class="l">今日失败</div></div>
-    <div class="stat s3"><div class="v">${sr}</div><div class="l">成功率</div></div>
-    <div class="stat s4"><div class="v">${st.available_accounts}/${st.total_accounts}</div><div class="l">可用号 · 剩余 ${st.total_remaining} 片</div></div>`;
+    <div class="stat s1"><div class="v">${st.today_completed}</div><div class="l">Produced today</div></div>
+    <div class="stat s2"><div class="v">${st.today_failed}</div><div class="l">Failed today</div></div>
+    <div class="stat s3"><div class="v">${sr}</div><div class="l">Success rate</div></div>
+    <div class="stat s4"><div class="v">${st.available_accounts}/${st.total_accounts}</div><div class="l">Available accounts · ${st.total_remaining} videos left</div></div>`;
   const max=Math.max(1,...st.per_day.map(d=>d.completed+d.failed));
   q('#chart').innerHTML=st.per_day.map(d=>`
     <div class="col">
       <div class="bars">
-        <div class="bar" style="height:${Math.round(d.completed/max*100)}px;background:#00b875" title="出片 ${d.completed}"></div>
-        <div class="bar" style="height:${Math.round(d.failed/max*100)}px;background:#e5484d" title="失败 ${d.failed}"></div>
+        <div class="bar" style="height:${Math.round(d.completed/max*100)}px;background:#00b875" title="Produced ${d.completed}"></div>
+        <div class="bar" style="height:${Math.round(d.failed/max*100)}px;background:#e5484d" title="Failed ${d.failed}"></div>
       </div>
       <div class="lbl">${d.day}</div>
     </div>`).join('');
   q('#perAccount').innerHTML=table(
-    ['账号','状态','调度','今日剩余','累计出片','最近使用'],
+    ['Account','Status','Scheduling','Remaining today','Total produced','Last used'],
     st.per_account.map(a=>[
       accLabel(a),
       statusBadge(a),
       `<label class="sw"><input type="checkbox" ${a.scheduling?'checked':''} onchange="setSched('${a.name}',this.checked)"><i></i></label>`,
-      `<b>${a.used_today}</b> / ${a.limit}<span class="tiny">（记录值）</span>`,
+      `<b>${a.used_today}</b> / ${a.limit}<span class="tiny">(recorded value)</span>`,
       a.completed_total||0,
       fmt(a.last_used_at)
     ])
   );
 }
 
-function accLabel(x){return x.email?`<div>${esc(x.email)}</div>`:'<span class="tiny">未录入邮箱</span>';}
+function accLabel(x){return x.email?`<div>${esc(x.email)}</div>`:'<span class="tiny">No email</span>';}
 function statusBadge(a){
-  if(a.busy)return '<span class="badge b-blue">出片中</span>';
-  if(a.rate_limited)return '<span class="badge b-orange">限流至 '+fmt(a.rate_limited_until)+'</span>';
-  if(a.quota_blocked)return '<span class="badge b-orange">积分不足至 '+fmt(a.quota_blocked_until)+'</span>';
-  if(a.cooling)return '<span class="badge b-orange">冷却至 '+fmtHM(a.cooldown_until)+'</span>';
-  if(a.login_ok===0)return '<span class="badge b-red">失效</span>';
-  if(a.login_ok===1)return '<span class="badge b-green">有效</span>';
-  return '<span class="badge b-gray">未验证</span>';
+  if(a.busy)return '<span class="badge b-blue">Generating</span>';
+  if(a.rate_limited)return '<span class="badge b-orange">Rate-limited until '+fmt(a.rate_limited_until)+'</span>';
+  if(a.quota_blocked)return '<span class="badge b-orange">Insufficient credits until '+fmt(a.quota_blocked_until)+'</span>';
+  if(a.cooling)return '<span class="badge b-orange">Cooling down until '+fmtHM(a.cooldown_until)+'</span>';
+  if(a.login_ok===0)return '<span class="badge b-red">Invalid</span>';
+  if(a.login_ok===1)return '<span class="badge b-green">Valid</span>';
+  return '<span class="badge b-gray">Unverified</span>';
 }
 
 function table(heads,rows){
   return `<table><thead><tr>${heads.map(h=>`<th>${h}</th>`).join('')}</tr></thead>
-    <tbody>${rows.length?rows.map(r=>`<tr>${r.map(c=>`<td>${c}</td>`).join('')}</tr>`).join(''):`<tr><td colspan="${heads.length}" class="empty">暂无数据</td></tr>`}</tbody></table>`;
+    <tbody>${rows.length?rows.map(r=>`<tr>${r.map(c=>`<td>${c}</td>`).join('')}</tr>`).join(''):`<tr><td colspan="${heads.length}" class="empty">No data</td></tr>`}</tbody></table>`;
 }
 
 async function setSched(name,on){
   try{await api('/api/admin/accounts/'+name,{method:'PATCH',body:{scheduling:on}});}catch(e){alert(e.message);}refresh();
 }
 
-/* ---- 账号管理 ---- */
+/* ---- Accounts ---- */
 async function loadAccounts(){
   const [a,j]=await Promise.all([api('/api/admin/accounts'),api('/api/admin/jobs')]);
   const jobs=j.jobs||{};
   const rows=a.accounts.map(x=>{
     const jb=jobs[x.name];
-    const badge=(jb&&jb.kind==='add'&&jb.status==='running')?'<span class="badge b-blue">加号中</span>'
-      :(jb&&jb.kind==='add'&&jb.status==='failed')?'<span class="badge b-red">加号失败</span>'
+    const badge=(jb&&jb.kind==='add'&&jb.status==='running')?'<span class="badge b-blue">Adding account…</span>'
+      :(jb&&jb.kind==='add'&&jb.status==='failed')?'<span class="badge b-red">Add failed</span>'
       :statusBadge(x);
     const warn=(jb&&jb.status==='failed')?' <span class="tiny" title="'+esc(jb.error)+'">⚠</span>':'';
     return [
@@ -260,129 +260,129 @@ async function loadAccounts(){
       `<b>${x.used_today}</b> / ${x.limit}`,
       fmt(x.last_used_at),
       fmt(x.created_at),
-      `<button class="btn" style="margin-right:6px" onclick="verify('${x.name}',this)">验证</button><button class="btn btn-danger" onclick="delAccount('${x.name}')">删除</button>`
+      `<button class="btn" style="margin-right:6px" onclick="verify('${x.name}',this)">Verify</button><button class="btn btn-danger" onclick="delAccount('${x.name}')">Delete</button>`
     ];
   });
-  q('#accountsTable').innerHTML=table(['内部账号','名称','状态','调度','今日剩余','最近使用','创建时间','操作'],rows);
+  q('#accountsTable').innerHTML=table(['Internal account','Name','Status','Scheduling','Remaining today','Last used','Created at','Actions'],rows);
 }
 
 async function verify(name,btn){
-  btn.disabled=true;const old=btn.textContent;btn.textContent='验证中…';
+  btn.disabled=true;const old=btn.textContent;btn.textContent='Verifying…';
   try{const r=await api('/api/admin/accounts/'+name+'/verify',{method:'POST'});
-    alert(name+' 登录态：'+(r.ok?'有效✓':'失效✗'));
+    alert(name+' login state: '+(r.ok?'Valid✓':'Invalid✗'));
   }catch(e){alert(e.message);}
   btn.disabled=false;btn.textContent=old;refresh();
 }
 
 async function delAccount(name){
-  if(!confirm('确定删除账号 '+name+'？将同时删除其 profile。'))return;
+  if(!confirm('Delete account '+name+'? Its profile will be deleted too.'))return;
   try{await api('/api/admin/accounts/'+name,{method:'DELETE'});}catch(e){alert(e.message);}refresh();
 }
 
 function openAddAccount(){
   let def='acc2';try{const n=document.querySelectorAll('#accountsTable tbody tr').length;def='acc'+(n+1);}catch(e){}
-  showDlg(`<h2>添加账号</h2>
-    <label>账号名</label><input id="f_name" value="${def}">
-    <label>Google 邮箱</label><input id="f_email" placeholder="xxx@yy.asia">
-    <label>密码</label><input id="f_pass" type="password">
-    <label>TOTP 密钥</label><input id="f_totp" placeholder="2FA secret">
-    <div class="row"><button class="btn" onclick="hide('dlg')">取消</button><button class="btn btn-p" onclick="submitAddAccount()">开始登录</button></div>`);
+  showDlg(`<h2>Add account</h2>
+    <label>Account name</label><input id="f_name" value="${def}">
+    <label>Google email</label><input id="f_email" placeholder="xxx@yy.asia">
+    <label>Password</label><input id="f_pass" type="password">
+    <label>TOTP secret</label><input id="f_totp" placeholder="2FA secret">
+    <div class="row"><button class="btn" onclick="hide('dlg')">Cancel</button><button class="btn btn-p" onclick="submitAddAccount()">Start sign-in</button></div>`);
 }
 async function submitAddAccount(){
   const body={name:q('#f_name').value.trim(),email:q('#f_email').value.trim(),password:q('#f_pass').value,totp:q('#f_totp').value.trim()};
-  if(!body.name||!body.email||!body.password)return alert('请填写账号名/邮箱/密码');
+  if(!body.name||!body.email||!body.password)return alert('Please fill in account name/email/password');
   try{await api('/api/admin/accounts',{method:'POST',body});}catch(e){return alert(e.message);}
   hide('dlg');refresh();
 }
 
-/* ---- 任务列表 ---- */
+/* ---- Tasks ---- */
 async function loadTasks(){
   const r=await api('/api/admin/tasks?limit=50');
-  const sb={'queued':'<span class="badge b-gray">排队中</span>','processing':'<span class="badge b-blue">生成中</span>','completed':'<span class="badge b-green">完成</span>','failed':'<span class="badge b-red">失败</span>'};
+  const sb={'queued':'<span class="badge b-gray">Queued</span>','processing':'<span class="badge b-blue">Generating</span>','completed':'<span class="badge b-green">Completed</span>','failed':'<span class="badge b-red">Failed</span>'};
   const rows=r.tasks.map(t=>[
     '<span class="tiny" title="'+esc(t.id)+'">'+t.id.replace('video_','').slice(0,10)+'</span>',
     '<span class="prompt" title="'+esc(t.prompt||'')+'">'+esc(t.prompt||'')+'</span>',
     t.account||'-',
     t.api_key_name||'—',
-    (t.duration||10)+'秒',
+    (t.duration||10)+'s',
     sb[t.status]||'<span class="badge b-gray">'+esc(t.status)+'</span>',
     fmt(t.created_at),
     t.video_url
-      ?'<div class="video-wrap"><a href="'+esc(t.video_url)+'" target="_blank">打开</a><button class="btn" onclick="playVideo(&quot;'+esc(t.video_url)+'&quot;)">预览</button></div>'
+      ?'<div class="video-wrap"><a href="'+esc(t.video_url)+'" target="_blank">Open</a><button class="btn" onclick="playVideo(&quot;'+esc(t.video_url)+'&quot;)">Preview</button></div>'
       :(t.status==='failed'?'<span class="tiny" title="'+esc(t.error||'')+'">'+esc((t.error||'').slice(0,30))+'</span>':'—')
   ]);
-  q('#tasksTable').innerHTML=table(['ID','提示词','账号','客户','时长','状态','创建时间','视频'],rows);
+  q('#tasksTable').innerHTML=table(['ID','Prompt','Account','Client','Duration','Status','Created at','Video'],rows);
 }
 
 function playVideo(url){q('#videoEl').src=url;show('videoModal');}
 function closeVideo(){q('#videoEl').pause();q('#videoEl').src='';hide('videoModal');}
 
-/* ---- API 密钥 ---- */
+/* ---- API Keys ---- */
 async function loadKeys(){
   const r=await api('/api/admin/keys');
   const mask=k=>'sk-'+k.slice(3,9)+'…'+k.slice(-4);
   const rows=r.keys.map(k=>[
     '<span style="font-family:monospace">'+mask(k.key)+'</span>',
     k.name||'—',
-    (k.allowed_durations||[]).join(' / ')+' 秒',
-    (k.daily_limit?`${k.today_total} / ${k.daily_limit}`:`${k.today_total} / 不限`),
-    (k.concurrency_limit?`${k.today_active} / ${k.concurrency_limit}`:`${k.today_active} / 不限`)+(k.today_queued?` <span class=\"tiny\">排队 ${k.today_queued}</span>`:''),
+    (k.allowed_durations||[]).join(' / ')+' s',
+    (k.daily_limit?`${k.today_total} / ${k.daily_limit}`:`${k.today_total} / Unlimited`),
+    (k.concurrency_limit?`${k.today_active} / ${k.concurrency_limit}`:`${k.today_active} / Unlimited`)+(k.today_queued?` <span class=\"tiny\">Queued ${k.today_queued}</span>`:''),
     `<label class="sw"><input type="checkbox" ${k.enabled?'checked':''} onchange="setKey('${k.key}',this.checked)"><i></i></label>`,
     fmt(k.last_used_at),
-    `<button class="btn" style="margin-right:6px" onclick="openEditKey('${k.key}')">设置</button><button class="btn btn-danger" onclick="delKey('${k.key}')">删除</button>`
+    `<button class="btn" style="margin-right:6px" onclick="openEditKey('${k.key}')">Settings</button><button class="btn btn-danger" onclick="delKey('${k.key}')">Delete</button>`
   ]);
-  q('#keysTable').innerHTML=table(['Key','名称','允许时长','今日任务','并发','启用','最近使用','操作'],rows)
-    +(r.env_keys>0?`<div class="hint" style="margin-top:10px">另有 ${r.env_keys} 个环境变量 key（永久有效，面板只读）</div>`:'');
+  q('#keysTable').innerHTML=table(['Key','Name','Allowed durations','Tasks today','Concurrency','Enabled','Last used','Actions'],rows)
+    +(r.env_keys>0?`<div class="hint" style="margin-top:10px">${r.env_keys} additional environment-variable key(s) (always valid, read-only in this panel)</div>`:'');
 }
 async function setKey(key,on){
   try{await api('/api/admin/keys/'+encodeURIComponent(key),{method:'PATCH',body:{enabled:on}});}catch(e){alert(e.message);}refresh();
 }
 async function delKey(key){
-  if(!confirm('删除该密钥？调用方将立即失效。'))return;
+  if(!confirm('Delete this key? Callers will immediately lose access.'))return;
   try{await api('/api/admin/keys/'+encodeURIComponent(key),{method:'DELETE'});}catch(e){alert(e.message);}refresh();
 }
 function durationChecks(values){
   values=values||[10,15,30];
-  return [10,15,30].map(v=>`<label style="display:inline-flex;align-items:center;gap:4px;margin-right:12px"><input type="checkbox" id="f_d${v}" ${values.includes(v)?'checked':''}>${v}秒</label>`).join('');
+  return [10,15,30].map(v=>`<label style="display:inline-flex;align-items:center;gap:4px;margin-right:12px"><input type="checkbox" id="f_d${v}" ${values.includes(v)?'checked':''}>${v}s</label>`).join('');
 }
 function openCreateKey(){
-  showDlg(`<h2>创建 API 密钥</h2>
-    <label>名称（可选）</label><input id="f_kname" placeholder="例如：客户A">
-    <label>每日任务上限（0 = 不限）</label><input id="f_daily" type="number" min="0" value="0">
-    <label>同时生成上限（0 = 不限）</label><input id="f_conc" type="number" min="0" value="0">
-    <label>允许的视频时长</label><div style="padding:8px 0">${durationChecks()}</div>
-    <label>过期时间戳（可选，留空 = 永久）</label><input id="f_exp" type="number" min="0" placeholder="Unix 时间戳">
-    <div class="row"><button class="btn" onclick="hide('dlg')">取消</button><button class="btn btn-p" onclick="submitCreateKey()">创建</button></div>`);
+  showDlg(`<h2>Create API key</h2>
+    <label>Name (optional)</label><input id="f_kname" placeholder="e.g. Customer A">
+    <label>Daily task limit (0 = unlimited)</label><input id="f_daily" type="number" min="0" value="0">
+    <label>Concurrent generation limit (0 = unlimited)</label><input id="f_conc" type="number" min="0" value="0">
+    <label>Allowed video durations</label><div style="padding:8px 0">${durationChecks()}</div>
+    <label>Expiration timestamp (optional, blank = never)</label><input id="f_exp" type="number" min="0" placeholder="Unix timestamp">
+    <div class="row"><button class="btn" onclick="hide('dlg')">Cancel</button><button class="btn btn-p" onclick="submitCreateKey()">Create</button></div>`);
 }
 function selectedDurations(){return [10,15,30].filter(v=>q('#f_d'+v)?.checked);}
 async function submitCreateKey(){
   const name=q('#f_kname').value.trim();
   const allowed=selectedDurations();
-  if(!allowed.length)return alert('至少选择一个视频时长');
+  if(!allowed.length)return alert('Select at least one video duration');
   const body={name,daily_limit:Number(q('#f_daily').value||0),concurrency_limit:Number(q('#f_conc').value||0),allowed_durations:allowed};
   const exp=q('#f_exp').value.trim();if(exp)body.expires_at=Number(exp);
   try{
     const r=await api('/api/admin/keys',{method:'POST',body});
     const k=r.created.key;
     hide('dlg');
-    showDlg(`<h2>创建成功，请保存密钥</h2>
-      <div class="tiny">完整 key 只在此显示一次：</div>
+    showDlg(`<h2>Created successfully — save your key</h2>
+      <div class="tiny">The full key is shown only once:</div>
       <div class="keyfull" id="newKey">${esc(k)}</div>
-      <div class="row"><button class="btn" onclick="copyFromNewKey()">复制</button><button class="btn btn-p" onclick="hide('dlg');loadKeys()">完成</button></div>`);
+      <div class="row"><button class="btn" onclick="copyFromNewKey()">Copy</button><button class="btn btn-p" onclick="hide('dlg');loadKeys()">Done</button></div>`);
   }catch(e){alert(e.message);}
 }
 async function openEditKey(key){
   const r=await api('/api/admin/keys');const k=r.keys.find(x=>x.key===key);if(!k)return;
-  showDlg(`<h2>设置 API 密钥</h2>
+  showDlg(`<h2>Edit API key</h2>
     <div class="tiny" style="margin-bottom:8px">${esc(k.name||key)}</div>
-    <label>每日任务上限（0 = 不限）</label><input id="f_daily" type="number" min="0" value="${k.daily_limit}">
-    <label>同时生成上限（0 = 不限）</label><input id="f_conc" type="number" min="0" value="${k.concurrency_limit}">
-    <label>允许的视频时长</label><div style="padding:8px 0">${durationChecks(k.allowed_durations)}</div>
-    <label>过期时间戳（0 = 永久）</label><input id="f_exp" type="number" min="0" value="${k.expires_at||0}">
-    <div class="row"><button class="btn" onclick="hide('dlg')">取消</button><button class="btn btn-p" onclick="submitEditKey('${key}')">保存</button></div>`);
+    <label>Daily task limit (0 = unlimited)</label><input id="f_daily" type="number" min="0" value="${k.daily_limit}">
+    <label>Concurrent generation limit (0 = unlimited)</label><input id="f_conc" type="number" min="0" value="${k.concurrency_limit}">
+    <label>Allowed video durations</label><div style="padding:8px 0">${durationChecks(k.allowed_durations)}</div>
+    <label>Expiration timestamp (0 = never)</label><input id="f_exp" type="number" min="0" value="${k.expires_at||0}">
+    <div class="row"><button class="btn" onclick="hide('dlg')">Cancel</button><button class="btn btn-p" onclick="submitEditKey('${key}')">Save</button></div>`);
 }
 async function submitEditKey(key){
-  const allowed=selectedDurations();if(!allowed.length)return alert('至少选择一个视频时长');
+  const allowed=selectedDurations();if(!allowed.length)return alert('Select at least one video duration');
   try{await api('/api/admin/keys/'+encodeURIComponent(key),{method:'PATCH',body:{daily_limit:Number(q('#f_daily').value||0),concurrency_limit:Number(q('#f_conc').value||0),allowed_durations:allowed,expires_at:Number(q('#f_exp').value||0)}});hide('dlg');refresh();}catch(e){alert(e.message);}
 }
 function copyFromNewKey(){copy(q('#newKey').textContent.trim());}
@@ -394,10 +394,10 @@ async function copy(text){
 
 function showDlg(html){q('#dlgBox').innerHTML=html;show('dlg');}
 
-/* 启动：探测鉴权，401 才弹登录遮罩（ADMIN_KEY 留空时免登录） */
+/* Boot: probe auth; show the login mask only on 401 (no login needed when ADMIN_KEY is empty) */
 (async function boot(){
   try{ await api('/api/admin/accounts'); hide('loginMask'); refresh(); }
-  catch(e){ /* 401 已在 api() 内触发 showLogin */ }
+  catch(e){ /* 401 already triggers showLogin inside api() */ }
 })();
 timer=setInterval(()=>{if(autoRefresh)refresh();},10000);
 </script>

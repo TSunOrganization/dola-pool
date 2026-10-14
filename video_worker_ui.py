@@ -1,13 +1,14 @@
-"""视频生成 worker v2（UI 流 + 滑块求解）——当前主线。
+"""Video-generation worker v2 (UI flow + slider solving) -- the current main path.
 
-链路：点「创建视频」→ 输入 → 回车（前端自带 a_bogus 签名，协议正确）
-     → 若弹 bdcaptcha 滑块：OpenCV 识别缺口 + 拟人轨迹拖动
-     → 前端自动重试提交 → 轮询 /im/chain/single 出片 → 下载到 downloads/
+Flow: click "Create video" -> type -> Enter (the frontend signs a_bogus itself, so the protocol is correct)
+     -> if the bdcaptcha slider pops up: OpenCV detects the gap + human-like trajectory drag
+     -> the frontend retries the submission automatically -> poll /im/chain/single for the result -> download to downloads/
 
-为什么走 UI 而不是页面内裸 fetch：裸 fetch 缺 webmssdk 的 a_bogus 签名，
-必触发 shark 滑块（710022004）；UI 流由前端自己签名，只需过滑块这一关。
+Why use the UI instead of a bare in-page fetch: a bare fetch lacks webmssdk's a_bogus
+signature and always triggers the shark slider (710022004); in the UI flow the frontend
+signs it itself, so only the slider needs to be passed.
 
-用法：python video_worker_ui.py <账号名> "提示词" [比例] [时长秒]
+Usage: python video_worker_ui.py <account_name> "prompt" [ratio] [duration_seconds]
 """
 import asyncio
 import json
@@ -27,7 +28,7 @@ from browser import cookie_value, launch_account_context
 from dola_client import CREDIT_FAIL_PATTERN, CreditError
 from video_worker import POLL_JS, RiskControlError, _download, extract_unwatermarked_url
 
-# Dola 返回的每日上限文案（当前日文 UI 实测：動画生成の 1 日あたりの上限に達しました。）
+# Daily-limit text returned by Dola (observed in the current Japanese UI: 動画生成の 1 日あたりの上限に達しました。)
 DAILY_LIMIT_PATTERN = re.compile(
     r"動画生成の\s*1日あたりの上限|每日(?:视频|影片)?生成.*(?:上限|限额|额度)|"
     r"daily.*(?:limit|quota)|(?:limit|quota).*per\s*day",
@@ -36,19 +37,19 @@ DAILY_LIMIT_PATTERN = re.compile(
 
 
 class AccountLimitedError(Exception):
-    """当前 Dola 账号达到每日视频生成上限，应立即换下一个账号。"""
+    """The current Dola account has reached the daily video-generation limit and should immediately switch to the next account."""
 
 
 class CreditInsufficientError(Exception):
-    """生成前已知积分不足，不提交视频，换下一个账号。"""
+    """Known to have insufficient credit before generation; do not submit a video, switch to the next account."""
 
 
-VIDEO_BTN = "text=動画を作成"          # ja-JP locale 下的入口文案
-CAPTCHA_FRAME_KEY = "bdcaptcha.html"   # 字节 verifycenter 滑块 iframe
+VIDEO_BTN = "text=動画を作成"          # entry label under the ja-JP locale
+CAPTCHA_FRAME_KEY = "bdcaptcha.html"   # ByteDance verifycenter slider iframe
 
 
-# 生成前只读检查：读取最近会话中的“剩余 N points/ポイント/积分”文案。
-# 新账号如果没有历史余额文案，返回 balance=null，交给实际提交流程判断，不误拦截。
+# Pre-generation read-only check: reads the "remaining N points/ポイント/积分" text from recent conversations.
+# If a new account has no historical balance text, it returns balance=null and leaves the decision to the actual submission flow, without falsely blocking.
 BALANCE_JS = r"""
 async ({msToken, fp}) => {
   const params = new URLSearchParams({
@@ -140,7 +141,7 @@ async def _fetch_bytes(url: str) -> bytes:
 
 
 async def attach_reference_images(page, image_paths: list[str]) -> None:
-    """通过 Dola 原生文件 input 上传参考图片，等待 prepare_upload/TOS 完成。"""
+    """Upload reference images through Dola's native file input and wait for prepare_upload/TOS to complete."""
     if not image_paths:
         return
     file_input = page.locator('input[type="file"]').first
@@ -162,22 +163,22 @@ async def attach_reference_images(page, image_paths: list[str]) -> None:
                                 for status, url in events)
             tos_count = sum("/upload/v1/" in url and 200 <= status < 300
                             for status, url in events)
-            # 缩略图出现且每个 prepare/TOS 都成功，才允许发送。
+            # Only allow sending once the thumbnail appears and every prepare/TOS succeeded.
             thumb_count = await page.locator('img[alt]').count()
             if prepare_count >= expected and tos_count >= expected and thumb_count >= expected:
                 await page.wait_for_timeout(800)
-                print(f"[upload] 参考图片上传完成: {expected} 张", flush=True)
+                print(f"[upload] reference images uploaded: {expected} image(s)", flush=True)
                 return
             await page.wait_for_timeout(250)
         raise TimeoutError(
-            f"参考图片上传超时: prepare={prepare_count}/{expected}, tos={tos_count}/{expected}"
+            f"reference image upload timed out: prepare={prepare_count}/{expected}, tos={tos_count}/{expected}"
         )
     finally:
         page.remove_listener("response", on_response)
 
 
 def _gen_track(distance: float):
-    """拟人轨迹：smootherstep 主行程 + 过冲回稳 + y 轴抖动。返回 [(dx,dy,dt_ms),...]"""
+    """Human-like trajectory: smootherstep main travel + overshoot settle + y-axis jitter. Returns [(dx,dy,dt_ms),...]"""
     steps = random.randint(45, 65)
     overshoot = random.uniform(3, 9)
     pts = []
@@ -193,8 +194,8 @@ def _gen_track(distance: float):
 
 
 async def solve_slider(page, frame, attempt: int) -> bool:
-    """在 bdcaptcha iframe 内识别缺口并拖动。成功返回 True。"""
-    # 等两张图加载完成（naturalWidth>0），否则 scale 算错
+    """Detect the gap inside the bdcaptcha iframe and drag. Returns True on success."""
+    # Wait for both images to finish loading (naturalWidth>0), otherwise the scale is computed wrong
     await frame.wait_for_selector("img", timeout=15000)
     await frame.evaluate("""async () => {
         const t0 = Date.now();
@@ -215,7 +216,7 @@ async def solve_slider(page, frame, attempt: int) -> bool:
     bg = next((i for i in imgs if ".jpeg" in i["src"] or "-2." in i["src"]), None)
     piece = next((i for i in imgs if i is not bg and (".png" in i["src"] or "-1." in i["src"])), None)
     if not bg or not piece:
-        print("  ✗ 未找到背景/滑块图", flush=True)
+        print("  ✗ background/slider images not found", flush=True)
         return False
 
     bg_bytes = await _fetch_bytes(bg["src"])
@@ -231,7 +232,7 @@ async def solve_slider(page, frame, attempt: int) -> bool:
     btn = frame.locator(".captcha-slider-btn")
     bb = await btn.bounding_box()
     if not bb:
-        print("  ✗ 未找到拖动按钮 .captcha-slider-btn", flush=True)
+        print("  ✗ drag button .captcha-slider-btn not found", flush=True)
         return False
     sx, sy = bb["x"] + bb["width"] / 2, bb["y"] + bb["height"] / 2
     await page.mouse.move(sx, sy)
@@ -272,28 +273,28 @@ def _parse_balance_texts(texts: list[str]) -> tuple[int | None, bool, str]:
 
 
 async def _preflight_balance(page, ms_token: str, fp: str, required: int) -> dict:
-    """尽力读取已知积分；未知时不误阻止新账号。"""
+    """Best-effort read of the known credit; when unknown, does not falsely block a new account."""
     try:
         result = await asyncio.wait_for(page.evaluate(
             BALANCE_JS, {"msToken": ms_token, "fp": fp}), timeout=30)
         balance, daily_limited, source = _parse_balance_texts(result.get("texts", []))
         if daily_limited:
-            raise AccountLimitedError(f"账号每日生成上限: {source[:120]}")
+            raise AccountLimitedError(f"account daily generation limit: {source[:120]}")
         if balance is not None and balance < required:
             raise CreditInsufficientError(
-                f"生成前积分不足: 当前 {balance}，本次至少需要 {required}（来源: {source[:120]}）"
+                f"insufficient credit before generation: currently {balance}, this run needs at least {required} (source: {source[:120]})"
             )
         return {"balance": balance, "source": source}
     except (AccountLimitedError, CreditInsufficientError):
         raise
     except Exception as e:
-        print(f"  余额预检未知（继续提交，不误拦截）: {str(e)[:120]}", flush=True)
+        print(f"  balance precheck unknown (continuing to submit, no false blocking): {str(e)[:120]}", flush=True)
         return {"balance": None, "source": ""}
 
 
 async def poll_conversation(account: str, page, context, conversation_id: str,
                             timeout: int, on_poll=None, on_balance=None) -> dict:
-    """轮询已受理会话；可被初次提交和服务重启恢复流程共同调用。"""
+    """Poll an already-accepted conversation; called by both the initial submission and the service-restart recovery flow."""
     cookies = await context.cookies("https://www.dola.com")
     ms_token, fp = cookie_value(cookies, "msToken"), cookie_value(cookies, "s_v_web_id")
     start = time.time()
@@ -304,7 +305,7 @@ async def poll_conversation(account: str, page, context, conversation_id: str,
             poll = await asyncio.wait_for(page.evaluate(
                 POLL_JS, {"conversationId": conversation_id, "msToken": ms_token, "fp": fp}), timeout=30)
         except Exception as e:
-            print(f"  轮询异常: {e}", flush=True)
+            print(f"  poll error: {e}", flush=True)
             continue
         now = time.time()
         if on_poll and now - last_callback >= 30:
@@ -315,25 +316,25 @@ async def poll_conversation(account: str, page, context, conversation_id: str,
             if balance is not None and on_balance:
                 on_balance(balance, source)
             if DAILY_LIMIT_PATTERN.search(text):
-                raise AccountLimitedError(f"账号每日生成上限: {text[:120]}")
+                raise AccountLimitedError(f"account daily generation limit: {text[:120]}")
             if CREDIT_FAIL_PATTERN.search(text):
-                raise CreditError(f"额度不足: {text[:80]}")
+                raise CreditError(f"insufficient credit: {text[:80]}")
         if poll.get("videos"):
             video_models = poll.get("videoModels", [])
             url = extract_unwatermarked_url(
                 video_models[0] if video_models else "", poll["videos"][0])
-            print(f"[{account}] 出片! 下载中（无水印优先）...", flush=True)
+            print(f"[{account}] video ready! downloading (watermark-free preferred)...", flush=True)
             local = await _download(url, account)
-            print(f"[{account}] 已下载 {local}（{local.stat().st_size / 1e6:.1f} MB）", flush=True)
+            print(f"[{account}] downloaded {local} ({local.stat().st_size / 1e6:.1f} MB)", flush=True)
             return {"video_url": url, "local_path": str(local),
                     "conversation_id": conversation_id, "account": account}
-        print(f"  ...生成中（{int(time.time() - start)}s）", flush=True)
-    raise TimeoutError(f"{timeout}s 内未出片（conversation_id={conversation_id}）")
+        print(f"  ...generating ({int(time.time() - start)}s)", flush=True)
+    raise TimeoutError(f"no video within {timeout}s (conversation_id={conversation_id})")
 
 
 async def resume_video(account: str, conversation_id: str, timeout: int,
                        on_poll=None, on_balance=None) -> dict:
-    """服务重启后恢复一个已受理会话，不重新发送 prompt。"""
+    """Resume an already-accepted conversation after a service restart, without resending the prompt."""
     async with async_playwright() as p:
         context = await launch_account_context(p, account, headless=False, use_extension=True)
         try:
@@ -351,10 +352,10 @@ async def generate_video(account: str, prompt: str, ratio: str = None,
                          model: str = "seedance_v2.0", use_extension: bool = True,
                          on_conversation_id=None, on_poll=None, on_balance=None,
                          reference_image_paths: list[str] | None = None) -> dict:
-    """完整出片流程（UI 流）。返回 {"video_url","local_path","conversation_id","account"}。
+    """Full generation flow (UI flow). Returns {"video_url","local_path","conversation_id","account"}.
 
-    ratio/duration: None = 用 UI 默认（当前默认 10s）。
-    异常：RiskControlError（滑块 3 次不过）、CreditError（额度不足）、TimeoutError。
+    ratio/duration: None = use the UI defaults (currently 10s).
+    Exceptions: RiskControlError (slider failed 3 times), CreditError (insufficient credit), TimeoutError.
     """
     timeout = timeout or config.VIDEO_TIMEOUT
     model_key = model.lower().replace("-", "_")
@@ -363,12 +364,12 @@ async def generate_video(account: str, prompt: str, ratio: str = None,
     elif model_key in ("seedance_2.0", "seedance_v2.0", "seedance_20", "seedance_v20"):
         model_key = "seedance_v2.0"
     else:
-        raise ValueError(f"不支持的模型: {model}（当前支持 seedance-2.0 / seedance-2.5）")
+        raise ValueError(f"unsupported model: {model} (currently supports seedance-2.0 / seedance-2.5)")
     if duration is not None and duration not in (10, 15, 30):
-        raise ValueError("Dola 当前固定支持 10 秒、15 秒和扩展注入的 30 秒")
+        raise ValueError("Dola currently supports fixed 10s and 15s, plus an extension-injected 30s")
     if duration == 30 and not use_extension:
-        raise ValueError("30 秒生成需要启用 Dola30 扩展")
-    # 30 秒视频（尤其 Seedance 2.5）页面会明确提示约 15 分钟，不能沿用 5 分钟默认值。
+        raise ValueError("30s generation requires the Dola30 extension to be enabled")
+    # For 30s videos (especially Seedance 2.5) the page explicitly warns of about 15 minutes, so the 5-minute default must not be reused.
     if duration == 30:
         timeout = max(timeout, 1800)
     if reference_image_paths:
@@ -385,12 +386,12 @@ async def generate_video(account: str, prompt: str, ratio: str = None,
             ms_token, fp = cookie_value(cookies, "msToken"), cookie_value(cookies, "s_v_web_id")
             await _preflight_balance(page, ms_token, fp, config.VIDEO_REQUIRED_POINTS)
 
-            # ---- UI 发送 ----
+            # ---- UI send ----
             await page.click(VIDEO_BTN)
             await page.wait_for_timeout(1500)
             if reference_image_paths:
                 await attach_reference_images(page, reference_image_paths)
-            # 选择模型。扩展/当前网页端文案：モデル 2.0高速、モデル 2.5。
+            # Select the model. Extension/current web-UI labels: モデル 2.0高速, モデル 2.5.
             try:
                 current_model = None
                 for label in ("モデル 2.0高速", "モデル 2.5"):
@@ -413,35 +414,35 @@ async def generate_video(account: str, prompt: str, ratio: str = None,
                         selected = True
                         break
                 if not selected:
-                    raise RuntimeError("模型选项不存在")
+                    raise RuntimeError("model option does not exist")
                 await page.wait_for_timeout(500)
             except Exception as e:
-                raise RuntimeError(f"设置模型失败（{model_key}）: {str(e)[:120]}") from e
+                raise RuntimeError(f"failed to set the model ({model_key}): {str(e)[:120]}") from e
             if ratio:
                 try:
                     await page.click("text=比率", timeout=3000)
                     await page.wait_for_timeout(500)
                     await page.click(f"text={ratio}", timeout=3000)
                 except Exception as e:
-                    print(f"  (设置比例失败，用默认: {str(e)[:80]})", flush=True)
+                    print(f"  (failed to set the ratio, using default: {str(e)[:80]})", flush=True)
             if duration:
                 try:
                     await page.click(f"text={duration}s", timeout=3000)
                 except Exception:
-                    try:  # 先点开时长下拉（当前值按钮如「10s」）再选
+                    try:  # first open the duration dropdown (the current-value button, e.g. "10s") then select
                         await page.get_by_text(re.compile(r"^\d+s$")).first.click(timeout=3000)
                         await page.wait_for_timeout(500)
                         await page.click(f"text={duration}s", timeout=3000)
                     except Exception as e:
-                        print(f"  (设置时长失败，用默认: {str(e)[:80]})", flush=True)
+                        print(f"  (failed to set the duration, using default: {str(e)[:80]})", flush=True)
             box = await page.query_selector("textarea") or await page.query_selector('[contenteditable="true"]')
             await box.click()
             await page.keyboard.type(prompt, delay=100)
             await page.wait_for_timeout(600)
             await page.keyboard.press("Enter")
-            print(f"[{account}] UI 已发送: {prompt[:40]}", flush=True)
+            print(f"[{account}] UI sent: {prompt[:40]}", flush=True)
 
-            # ---- 滑块求解（最多 3 次）----
+            # ---- Slider solving (up to 3 times) ----
             solved_or_absent = False
             for attempt in range(1, 4):
                 frame = None
@@ -453,18 +454,18 @@ async def generate_video(account: str, prompt: str, ratio: str = None,
                 if not frame:
                     solved_or_absent = True
                     break
-                print(f"[{account}] 滑块出现，第 {attempt} 次求解...", flush=True)
+                print(f"[{account}] slider appeared, solving attempt {attempt}...", flush=True)
                 if await solve_slider(page, frame, attempt):
-                    print(f"[{account}] 滑块通过 ✓", flush=True)
-                    await page.wait_for_timeout(3000)  # 等前端自动重试提交
+                    print(f"[{account}] slider passed ✓", flush=True)
+                    await page.wait_for_timeout(3000)  # wait for the frontend to retry the submission automatically
                     solved_or_absent = True
                     break
-                print(f"[{account}] 滑块未过，等刷新重试", flush=True)
+                print(f"[{account}] slider not passed, waiting for refresh to retry", flush=True)
             if not solved_or_absent:
                 await page.screenshot(path="solve_fail.png")
-                raise RiskControlError("滑块 3 次未通过")
+                raise RiskControlError("slider not passed after 3 attempts")
 
-            # ---- 等真实 conversation_id（URL 从 local_x 变成数字 id）----
+            # ---- Wait for the real conversation_id (URL changes from local_x to a numeric id) ----
             conv_id = ""
             for _ in range(30):
                 await page.wait_for_timeout(1000)
@@ -474,8 +475,8 @@ async def generate_video(account: str, prompt: str, ratio: str = None,
                     break
             if not conv_id:
                 await page.screenshot(path="no_conv.png")
-                raise TimeoutError("30s 未拿到 conversation_id")
-            print(f"[{account}] conversation_id={conv_id}，轮询出片...", flush=True)
+                raise TimeoutError("did not obtain a conversation_id within 30s")
+            print(f"[{account}] conversation_id={conv_id}, polling for the video...", flush=True)
 
             deadline = time.time() + timeout
             if on_conversation_id:
@@ -487,7 +488,7 @@ async def generate_video(account: str, prompt: str, ratio: str = None,
 
 async def _main():
     account = sys.argv[1] if len(sys.argv) > 1 else "acc1"
-    prompt = sys.argv[2] if len(sys.argv) > 2 else "一只橘猫在窗台上打盹，阳光洒进来"
+    prompt = sys.argv[2] if len(sys.argv) > 2 else "An orange cat napping on a windowsill, sunlight streaming in"
     ratio = sys.argv[3] if len(sys.argv) > 3 else None
     duration = int(sys.argv[4]) if len(sys.argv) > 4 else None
     model = sys.argv[5] if len(sys.argv) > 5 else "seedance_v2.0"

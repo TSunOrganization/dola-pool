@@ -1,4 +1,4 @@
-"""诊断：直接打开会话 38416270392802065，看出片与否 + dump 轮询原始响应。"""
+"""Diagnostic: open conversation 38416270392802065 directly, check whether a video was produced + dump the raw polling response."""
 import asyncio
 import json
 
@@ -24,7 +24,7 @@ async def main():
             return {videos, texts: texts.slice(-12)};
         }""")
         print("videos:", json.dumps(info["videos"], ensure_ascii=False))
-        print("尾部文本:")
+        print("Tail text:")
         for t in info["texts"]:
             print("  |", t)
 
@@ -34,7 +34,7 @@ async def main():
             "msToken": cookie_value(cookies, "msToken"),
             "fp": cookie_value(cookies, "s_v_web_id"),
         })
-        print("\n=== POLL_JS 解析结果 ===")
+        print("\n=== POLL_JS parse result ===")
         print(json.dumps(poll, ensure_ascii=False)[:800])
         await context.close()
 

@@ -1,7 +1,7 @@
-"""浏览器版号池：扫描 accounts/ profile，每号每天 2 片硬限额，同号互斥。
+"""Browser-based account pool: scans accounts/ profiles, hard limit of 2 videos per account per day, mutual exclusion per account.
 
-v2：accounts_meta 元数据表（调度开关/备注/登录态缓存/风控冷却），面板读写同一份数据。
-配额计数落 SQLite（pool_usage.db），保守计数：出片成功或额度报错才记 1 次。
+v2: accounts_meta metadata table (scheduling switch/notes/login-state cache/risk-control cooldown); the panel reads and writes the same data.
+Quota counts are stored in SQLite (pool_usage.db), counted conservatively: a count is recorded only on a successful video or a credit error.
 """
 import asyncio
 import shutil
@@ -18,15 +18,15 @@ from video_worker_ui import (
 import config
 
 DAILY_LIMIT = 2
-COOLDOWN_SEC = 1800  # 风控冷却 30 分钟
+COOLDOWN_SEC = 1800  # risk-control cooldown of 30 minutes
 
 
 class AllAccountsLimitedError(RuntimeError):
-    """所有已开启调度的账号都达到 Dola 每日视频上限。"""
+    """All accounts with scheduling enabled have reached the Dola daily video limit."""
 
 
 class AllAccountsQuotaBlockedError(RuntimeError):
-    """所有已开启调度的账号都已知积分不足。"""
+    """All accounts with scheduling enabled are known to have insufficient credit."""
 
 
 class BrowserPool:
@@ -63,7 +63,7 @@ class BrowserPool:
             """
         )
         self._conn.commit()
-        # 旧库兼容：补新元数据列
+        # Backward compatibility with old databases: add the new metadata columns
         for column, definition in (
             ("email", "TEXT DEFAULT ''"),
             ("rate_limited_until", "REAL DEFAULT 0"),
@@ -79,7 +79,7 @@ class BrowserPool:
             except sqlite3.OperationalError:
                 pass
 
-    # ===== 账号发现/元数据 =====
+    # ===== Account discovery / metadata =====
 
     def _ensure_meta(self, name: str):
         self._conn.execute(
@@ -118,11 +118,11 @@ class BrowserPool:
         self._conn.commit()
 
     def _next_limit_reset(self) -> float:
-        """计算下一次每日额度刷新时间（默认日本时间次日 00:00）。"""
+        """Compute the next daily-quota reset time (default: 00:00 the next day, Japan time)."""
         try:
             tz = ZoneInfo(config.LIMIT_RESET_TZ)
         except Exception:
-            # 运行环境未安装 tzdata 时，对常用亚洲时区使用固定偏移 fallback。
+            # When tzdata is not installed in the runtime, fall back to a fixed offset for common Asian timezones.
             offsets = {"Asia/Tokyo": 9, "Asia/Hong_Kong": 8, "UTC": 0}
             tz = timezone(timedelta(hours=offsets.get(config.LIMIT_RESET_TZ, 9)))
         now = datetime.now(tz)
@@ -147,7 +147,7 @@ class BrowserPool:
         self._conn.commit()
 
     def _mark_daily_limit(self, account: str, reason: str = ""):
-        """Dola 明确返回每日上限：封顶计数并标记到恢复时间，期间完全跳过该号。"""
+        """Dola explicitly returned the daily limit: cap the count and mark it until the reset time, skipping this account entirely in the meantime."""
         self._conn.execute(
             "INSERT INTO usage(account, day, used) VALUES (?,?,?) "
             "ON CONFLICT(account, day) DO UPDATE SET used=MAX(used, excluded.used)",
@@ -160,7 +160,7 @@ class BrowserPool:
         self._conn.commit()
 
     def list_accounts(self) -> list:
-        """面板视图：meta + 配额 + 限流状态 + 是否忙合并。"""
+        """Panel view: merged meta + quota + rate-limit status + busy flag."""
         self._clear_expired_rate_limits()
         now = time.time()
         out = []
@@ -219,7 +219,7 @@ class BrowserPool:
     def delete_account(self, name: str):
         lock = self._locks.get(name)
         if lock and lock.locked():
-            raise RuntimeError("账号正在出片，不能删除")
+            raise RuntimeError("account is generating a video and cannot be deleted")
         d = self.accounts_dir / name
         if d.exists():
             shutil.rmtree(d)
@@ -227,12 +227,12 @@ class BrowserPool:
         self._conn.commit()
 
     async def verify_account(self, name: str) -> bool:
-        """无头验证登录态并写回缓存。号忙抛 RuntimeError。"""
+        """Headlessly verify the login state and write it back to the cache. Raises RuntimeError if the account is busy."""
         if name not in self.accounts:
-            raise FileNotFoundError(f"profile 不存在: {name}")
+            raise FileNotFoundError(f"profile does not exist: {name}")
         lock = self._locks.setdefault(name, asyncio.Lock())
         if lock.locked():
-            raise RuntimeError("账号正在出片，稍后再验证")
+            raise RuntimeError("account is generating a video; verify later")
         from browser import check_login_state
         ok = await check_login_state(name)
         self._conn.execute(
@@ -242,7 +242,7 @@ class BrowserPool:
         self._conn.commit()
         return ok
 
-    # ===== 调度 =====
+    # ===== Scheduling =====
 
     def _set_credit_balance(self, account: str, balance: int, source: str = ""):
         self._conn.execute(
@@ -252,7 +252,7 @@ class BrowserPool:
         if balance < 2:
             self._conn.execute(
                 "UPDATE accounts_meta SET quota_blocked_until=?, quota_reason=? WHERE name=?",
-                (self._next_limit_reset(), source[:300] or "积分不足", account),
+                (self._next_limit_reset(), source[:300] or "insufficient credit", account),
             )
         self._conn.commit()
 
@@ -267,7 +267,7 @@ class BrowserPool:
 
     @property
     def all_accounts_limited(self) -> bool:
-        """所有开启调度且未处于风控冷却的账号都已达到每日上限。"""
+        """All accounts with scheduling enabled and not in risk-control cooldown have reached the daily limit."""
         candidates = [a for a in self.list_accounts() if a["scheduling"] and not a["cooling"]]
         return bool(candidates) and all(
             a["rate_limited"] or a["used_today"] >= DAILY_LIMIT for a in candidates
@@ -286,7 +286,7 @@ class BrowserPool:
         return any(self._schedulable(a) for a in self.list_accounts())
 
     @property
-    def cookie_count(self) -> int:  # 兼容 /health 旧字段
+    def cookie_count(self) -> int:  # backward compatibility with the old /health field
         return len(self.accounts)
 
     def account_status(self) -> list:
@@ -298,7 +298,7 @@ class BrowserPool:
 
     async def resume_video(self, account: str, conversation_id: str, timeout: int,
                            on_poll=None) -> dict:
-        """恢复已受理会话；不参与选号，也不因账号当前额度状态跳过。"""
+        """Resume an already-accepted conversation; it does not take part in account selection and is not skipped due to the account's current credit status."""
         async with self.semaphore:
             lock = self._locks.setdefault(account, asyncio.Lock())
             async with lock:
@@ -322,7 +322,7 @@ class BrowserPool:
                              model: str = "seedance_v2.0", on_conversation_id=None,
                              on_poll=None, on_balance=None,
                              reference_image_paths: list[str] | None = None) -> dict:
-        """挑一个可调度且空闲的号出片；额度不足/风控自动换号（风控号进冷却）。"""
+        """Pick a schedulable and idle account to generate a video; automatically switch accounts on insufficient credit/risk control (risk-controlled accounts enter cooldown)."""
         async with self.semaphore:
             last_err = None
             for a in self.list_accounts():
@@ -330,12 +330,12 @@ class BrowserPool:
                     continue
                 account = a["name"]
                 lock = self._locks.setdefault(account, asyncio.Lock())
-                # 并发任务跳过已占用账号，避免多个请求排队到同一个 profile。
+                # Concurrent tasks skip accounts that are already in use, to avoid multiple requests queuing on the same profile.
                 if lock.locked():
                     continue
                 async with lock:
                     if not self._schedulable(next(x for x in self.list_accounts() if x['name'] == account)):
-                        continue  # 等待期间状态变化
+                        continue  # state changed while waiting
                     try:
                         def on_balance(balance, source=""):
                             self._set_credit_balance(account, balance, source)
@@ -351,22 +351,22 @@ class BrowserPool:
                         self._conn.commit()
                         return result
                     except CreditInsufficientError as e:
-                        print(f"[pool] {account} 生成前积分不足，跳过: {e}", flush=True)
+                        print(f"[pool] {account} insufficient credit before generation, skipping: {e}", flush=True)
                         self._mark_quota_blocked(account, str(e))
                         last_err = e
                         continue
                     except AccountLimitedError as e:
-                        print(f"[pool] {account} 达到每日上限，立即换号: {e}", flush=True)
+                        print(f"[pool] {account} reached the daily limit, switching account immediately: {e}", flush=True)
                         self._mark_daily_limit(account, str(e))
                         last_err = e
                         continue
                     except CreditError as e:
-                        print(f"[pool] {account} 额度不足，换号: {e}", flush=True)
+                        print(f"[pool] {account} insufficient credit, switching account: {e}", flush=True)
                         self._claim(account)
                         last_err = e
                         continue
                     except RiskControlError as e:
-                        print(f"[pool] {account} 风控，冷却 30 分钟，换号: {e}", flush=True)
+                        print(f"[pool] {account} risk control, cooling down for 30 minutes, switching account: {e}", flush=True)
                         self._conn.execute(
                             "UPDATE accounts_meta SET cooldown_until=? WHERE name=?",
                             (time.time() + COOLDOWN_SEC, account))
@@ -374,8 +374,8 @@ class BrowserPool:
                         last_err = e
                         continue
                     except TimeoutError as e:
-                        # 请求已拿到 conversation_id 后仍可能在 Dola 端继续生成。
-                        # 绝不能因为本地轮询超时就换号重提，否则会重复扣额度/重复出片。
+                        # After the request has obtained a conversation_id, Dola may still be generating.
+                        # Never switch accounts and resubmit just because local polling timed out, or credit will be double-charged / the video produced twice.
                         self._claim(account)
                         self._conn.execute(
                             "UPDATE accounts_meta SET last_used_at=? WHERE name=?",
@@ -383,15 +383,15 @@ class BrowserPool:
                         self._conn.commit()
                         raise
                     except FileNotFoundError as e:
-                        print(f"[pool] {account} profile 缺失，跳过: {e}", flush=True)
+                        print(f"[pool] {account} profile missing, skipping: {e}", flush=True)
                         last_err = e
                         continue
             if self.all_accounts_quota_blocked:
                 raise AllAccountsQuotaBlockedError(
-                    f"429: 所有已开启调度的账号均已知积分不足: {last_err or '无号'}"
+                    f"429: all accounts with scheduling enabled are known to have insufficient credit: {last_err or 'no account'}"
                 )
             if self.all_accounts_limited:
                 raise AllAccountsLimitedError(
-                    f"429: 所有已开启调度的账号均已达到 Dola 每日视频上限: {last_err or '无号'}"
+                    f"429: all accounts with scheduling enabled have reached the Dola daily video limit: {last_err or 'no account'}"
                 )
-            raise RuntimeError(f"号池无可用账号（调度关闭/冷却/额度用完）: {last_err or '无号'}")
+            raise RuntimeError(f"no usable account in the pool (scheduling off/cooldown/credit exhausted): {last_err or 'no account'}")

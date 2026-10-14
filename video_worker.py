@@ -1,13 +1,16 @@
-"""视频生成 worker：复用 accounts/<账号> profile 登录态，页面内 fetch 提交视频生成，
-轮询 /im/chain/single 出片，拿到 download_url 后下载到 downloads/。
+"""Video-generation worker: reuses the login session of an accounts/<account> profile,
+submits video generation via an in-page fetch, polls /im/chain/single for the result,
+and downloads it to downloads/ once a download_url is obtained.
 
-协议字段全部来自 dola_client.py 的逆向成果（_build_video_body / _poll_video），
-传输层换成「真实浏览器页面内 fetch」以规避滑块风控。
+All protocol fields come from the reverse-engineering in dola_client.py
+(_build_video_body / _poll_video); the transport layer is replaced with a
+"fetch inside a real browser page" to evade slider risk control.
 
-用法：python video_worker.py <账号名> "提示词" [比例] [时长秒]
-示例：python video_worker.py acc1 "一只猫在草地上追蝴蝶" 9:16 5
+Usage: python video_worker.py <account_name> "prompt" [ratio] [duration_seconds]
+Example: python video_worker.py acc1 "A cat chasing butterflies on the grass" 9:16 5
 
-验收标准：一次完整出片，拿到 dola CDN download_url + 本地视频文件。
+Acceptance criteria: one complete generation, obtaining a dola CDN download_url
+plus a local video file.
 """
 import asyncio
 import base64
@@ -24,13 +27,13 @@ from browser import cookie_value, launch_account_context
 from dola_client import CREDIT_FAIL_PATTERN, CreditError
 from video_probe import SUBMIT_JS
 
-# 轮询 /im/chain/single（字段对齐 dola_client._request_im_chain / _poll_video）
-# 注意：Content-Type 要带 encoding=utf-8，agw-js-conv 用 str（不是 "str, str"）
+# Poll /im/chain/single (fields aligned with dola_client._request_im_chain / _poll_video)
+# Note: Content-Type must include encoding=utf-8, and agw-js-conv must be str (not "str, str")
 POLL_JS = r"""
 async ({conversationId, msToken, fp}) => {
-  // 2026-08 现行协议：body 必须包 uplink_body.pull_singe_chain_uplink_body，
-  // anchor_index=MAX_SAFE_INTEGER + direction=1 拉最新；channel=2, version="1"。
-  // （dola_client.py 里的扁平 body 是旧协议，返回 712010202）
+  // Current protocol as of 2026-08: the body must wrap uplink_body.pull_singe_chain_uplink_body,
+  // anchor_index=MAX_SAFE_INTEGER + direction=1 to pull the latest; channel=2, version="1".
+  // (The flat body in dola_client.py is the old protocol and returns 712010202)
   const params = new URLSearchParams({
     version_code: "20800", language: "ja", device_platform: "web",
     doubao_device_platform: "web", aid: "495671", real_aid: "495671",
@@ -102,11 +105,12 @@ async ({conversationId, msToken, fp}) => {
 
 
 def extract_unwatermarked_url(video_model_str: str, fallback_url: str) -> str:
-    """从 video_model.video_list.*.main_url 提取无水印视频地址（base64）。
+    """Extract the watermark-free video URL (base64) from video_model.video_list.*.main_url.
 
-    无水印版本与普通 download_url 是同一内容的不同签名链接，
-    查询参数 lr=unwatermarked（普通链接为 lr=cici_ai）。
-    失败时回退 download_url。
+    The watermark-free version and the regular download_url are differently signed
+    links to the same content; the query parameter is lr=unwatermarked
+    (the regular link uses lr=cici_ai).
+    Falls back to download_url on failure.
     """
     try:
         vm = json.loads(video_model_str or "{}")
@@ -133,33 +137,33 @@ def extract_unwatermarked_url(video_model_str: str, fallback_url: str) -> str:
 
 
 class RiskControlError(Exception):
-    """触发滑块/风控（710022004 slide / 710022002 限流），该账号+IP 需冷却或换号"""
+    """Slider/risk control triggered (710022004 slide / 710022002 rate limit); this account+IP must cool down or be switched"""
 
 
 def _check_submit(result: dict) -> str:
-    """检查 SUBMIT_JS 结果，返回 conversation_id；风控/异常直接抛。"""
+    """Check the SUBMIT_JS result and return the conversation_id; raise directly on risk control/errors."""
     status = result.get("status")
     if status != 200:
-        raise RiskControlError(f"提交失败 HTTP {status}: {json.dumps(result.get('events', []), ensure_ascii=False)[:300]}")
+        raise RiskControlError(f"submission failed HTTP {status}: {json.dumps(result.get('events', []), ensure_ascii=False)[:300]}")
 
     for err in result.get("errors", []):
         if "710022004" in err or "slide" in err or "shark" in err:
-            raise RiskControlError(f"触发滑块风控: {err[:300]}")
+            raise RiskControlError(f"slider risk control triggered: {err[:300]}")
         if "710022002" in err:
-            raise RiskControlError(f"触发限流: {err[:300]}")
-        raise Exception(f"提交返回错误事件: {err[:300]}")
+            raise RiskControlError(f"rate limit triggered: {err[:300]}")
+        raise Exception(f"submission returned an error event: {err[:300]}")
 
     conv_id = result.get("convId") or ""
     if not conv_id:
         raise Exception(
-            "视频受理未返回 conversation_id: "
+            "video submission did not return a conversation_id: "
             + json.dumps(result.get("events", []), ensure_ascii=False)[:300]
         )
     return conv_id
 
 
 async def _download(url: str, account: str) -> Path:
-    """下载视频到 DOWNLOAD_DIR（走代理，CDN 可能也限地区）。返回本地路径。"""
+    """Download the video to DOWNLOAD_DIR (via the proxy; the CDN may also be region-restricted). Returns the local path."""
     dl_dir = Path(config.DOWNLOAD_DIR)
     dl_dir.mkdir(parents=True, exist_ok=True)
     fname = dl_dir / f"{account}_{time.strftime('%Y%m%d_%H%M%S')}.mp4"
@@ -175,11 +179,11 @@ async def _download(url: str, account: str) -> Path:
 
 async def generate_video(account: str, prompt: str, ratio: str = "9:16",
                          duration: int = 5, timeout: int = None) -> dict:
-    """完整出片流程：提交 → 轮询 → 下载。
+    """Full generation flow: submit -> poll -> download.
 
-    返回 {"video_url": dola CDN 临时链接, "local_path": 本地文件, "conversation_id": ...}
-    异常：RiskControlError（风控/限流）、CreditError（额度不足，换号）、
-         TimeoutError（超时未出片）、FileNotFoundError（profile 不存在）
+    Returns {"video_url": dola CDN temporary link, "local_path": local file, "conversation_id": ...}
+    Exceptions: RiskControlError (risk control/rate limit), CreditError (insufficient credit, switch account),
+         TimeoutError (timed out without a video), FileNotFoundError (profile does not exist)
     """
     timeout = timeout or config.VIDEO_TIMEOUT
     async with async_playwright() as p:
@@ -192,19 +196,19 @@ async def generate_video(account: str, prompt: str, ratio: str = "9:16",
             cookies = await context.cookies("https://www.dola.com")
             sessionid = cookie_value(cookies, "sessionid")
             if not sessionid:
-                raise CreditError(f"{account} 登录态失效（无 sessionid），请重跑 login.py {account}")
+                raise CreditError(f"{account} login session is invalid (no sessionid); rerun login.py {account}")
             ms_token = cookie_value(cookies, "msToken")
             fp = cookie_value(cookies, "s_v_web_id")
 
-            print(f"[{account}] 提交视频生成: {prompt[:40]} | {ratio} | {duration}s", flush=True)
-            # evaluate 无 timeout 参数，用 wait_for 兜底（SSE 流读完即返回）
+            print(f"[{account}] submitting video generation: {prompt[:40]} | {ratio} | {duration}s", flush=True)
+            # evaluate has no timeout parameter, so use wait_for as a fallback (returns once the SSE stream is fully read)
             result = await asyncio.wait_for(page.evaluate(
                 SUBMIT_JS,
                 {"prompt": prompt, "ratio": ratio, "duration": duration,
                  "msToken": ms_token, "fp": fp},
             ), timeout=180)
             conv_id = _check_submit(result)
-            print(f"[{account}] 已受理 conversation_id={conv_id}，轮询出片中...", flush=True)
+            print(f"[{account}] accepted conversation_id={conv_id}, polling for the video...", flush=True)
 
             start = time.time()
             while time.time() - start < timeout:
@@ -215,46 +219,46 @@ async def generate_video(account: str, prompt: str, ratio: str = "9:16",
                         {"conversationId": conv_id, "msToken": ms_token, "fp": fp},
                     ), timeout=30)
                 except Exception as e:
-                    print(f"[{account}] 轮询异常（继续重试）: {e}", flush=True)
+                    print(f"[{account}] poll error (continuing to retry): {e}", flush=True)
                     continue
                 if not poll.get("ok"):
                     continue
 
                 for text in poll.get("texts", []):
                     if CREDIT_FAIL_PATTERN.search(text):
-                        raise CreditError(f"额度不足: {text[:80]}")
+                        raise CreditError(f"insufficient credit: {text[:80]}")
 
                 videos = poll.get("videos", [])
                 if videos:
                     url = videos[0]
-                    print(f"[{account}] 出片成功 download_url={url[:100]}...", flush=True)
+                    print(f"[{account}] video ready download_url={url[:100]}...", flush=True)
                     local = await _download(url, account)
-                    print(f"[{account}] 已下载 {local}（{local.stat().st_size / 1e6:.1f} MB）", flush=True)
+                    print(f"[{account}] downloaded {local} ({local.stat().st_size / 1e6:.1f} MB)", flush=True)
                     return {
                         "video_url": url,
                         "local_path": str(local),
                         "conversation_id": conv_id,
                         "account": account,
                     }
-                print(f"[{account}] ...生成中（已等 {int(time.time() - start)}s）", flush=True)
+                print(f"[{account}] ...generating (waited {int(time.time() - start)}s)", flush=True)
 
-            raise TimeoutError(f"{timeout}s 内未出片（conversation_id={conv_id}）")
+            raise TimeoutError(f"no video within {timeout}s (conversation_id={conv_id})")
         finally:
             await context.close()
 
 
 async def _main():
     account = sys.argv[1] if len(sys.argv) > 1 else "acc1"
-    prompt = sys.argv[2] if len(sys.argv) > 2 else "一只猫在草地上追蝴蝶"
+    prompt = sys.argv[2] if len(sys.argv) > 2 else "A cat chasing butterflies on the grass"
     ratio = sys.argv[3] if len(sys.argv) > 3 else "9:16"
     duration = int(sys.argv[4]) if len(sys.argv) > 4 else 5
 
     try:
         result = await generate_video(account, prompt, ratio, duration)
     except (RiskControlError, CreditError, TimeoutError) as e:
-        print(f"\n失败: {e}")
+        print(f"\nfailed: {e}")
         sys.exit(1)
-    print("\n=== 结果 ===")
+    print("\n=== Result ===")
     print(json.dumps(result, ensure_ascii=False, indent=2))
 
 

@@ -1,84 +1,84 @@
 # dola-pool
 
-dola.com（字节 Seedance 视频模型）号池 → OpenAI 兼容视频 API 分发服务。
+dola.com (ByteDance Seedance video model) account pool → OpenAI-compatible video API distribution service.
 
-## 结构
+## Structure
 
-| 文件 | 作用 |
+| File | Purpose |
 |---|---|
-| `dola_client.py` | 上游 SDK（协议逆向，来自 astrbot_plugin_doubao_free） |
-| `pool.py` | 号池管理（cookie 加载 + 多账号轮询 + 并发信号量） |
-| `store.py` | 任务状态持久化（SQLite） |
-| `server.py` | FastAPI 服务，OpenAI 兼容接口 |
-| `config.py` | 配置（环境变量） |
-| `cookies.txt` | 号池 cookie（一行一个，gitignore） |
+| `dola_client.py` | Upstream SDK (protocol reverse engineering, from astrbot_plugin_doubao_free) |
+| `pool.py` | Account pool management (cookie loading + multi-account round-robin + concurrency semaphore) |
+| `store.py` | Task state persistence (SQLite) |
+| `server.py` | FastAPI service, OpenAI-compatible interface |
+| `config.py` | Configuration (environment variables) |
+| `cookies.txt` | Pool cookies (one per line, gitignored) |
 
-## 部署
+## Deployment
 
 ```bash
-# 1. 安装依赖（用 venv 隔离）
+# 1. Install dependencies (isolate with venv)
 python -m venv .venv
 source .venv/bin/activate          # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 
-# 2. 准备号池
+# 2. Prepare the account pool
 cp cookies.txt.example cookies.txt
-# 编辑 cookies.txt，填入真实 cookie（一行一个）
+# Edit cookies.txt and fill in real cookies (one per line)
 
-# 3. 配置代理（dola.com 需 JP/KR 出口，服务器在大陆必须配）
+# 3. Configure the proxy (dola.com needs a JP/KR egress; mandatory if the server is in mainland China)
 export HTTPS_PROXY=http://user:pass@jp-proxy:port   # Windows PowerShell: $env:HTTPS_PROXY=...
 export HTTP_PROXY=$HTTPS_PROXY
 
-# 4. 配置服务
-export DOLA_API_KEYS=sk-xxx        # 对外 API key，逗号分隔多个
-export DOLA_MAX_CONCURRENCY=3      # 并发任务上限
-export DOLA_VIDEO_TIMEOUT=300      # 出片超时（秒）
+# 4. Configure the service
+export DOLA_API_KEYS=sk-xxx        # Public API key(s), comma-separated for multiple
+export DOLA_MAX_CONCURRENCY=3      # Max concurrent tasks
+export DOLA_VIDEO_TIMEOUT=300      # Video generation timeout (seconds)
 
-# 5. 启动
+# 5. Start
 uvicorn server:app --host 0.0.0.0 --port 8000
 ```
 
-## API 用法
+## API usage
 
-对外固定视频时长为 **10 秒、15 秒、30 秒**。创建视频接口默认使用 10 秒；每个数据库 API Key 还可以在管理面板中单独设置每日额度、并发上限和允许时长。
+The externally exposed video durations are fixed at **10 seconds, 15 seconds, and 30 seconds**. The create-video endpoint uses 10 seconds by default; each database API Key can additionally have its own daily quota, concurrency cap, and allowed durations configured individually in the admin panel.
 
 ```bash
-# 创建视频任务
+# Create a video task
 curl -X POST http://127.0.0.1:8000/v1/videos/generations \
   -H "Authorization: Bearer sk-xxx" \
   -H "Content-Type: application/json" \
-  -d '{"model":"seedance-v2.0","prompt":"一只猫追蝴蝶","size":"720x1280","duration":15}'
+  -d '{"model":"seedance-v2.0","prompt":"a cat chasing a butterfly","size":"720x1280","duration":15}'
 # -> {"id":"video_xxx","status":"queued","model":"seedance-v2.0","prompt":"..."}
 
-# 查询任务（status: queued -> processing -> completed / failed）
+# Query a task (status: queued -> processing -> completed / failed)
 curl http://127.0.0.1:8000/v1/videos/video_xxx \
   -H "Authorization: Bearer sk-xxx"
 # -> {"id":"video_xxx","status":"completed","video_url":"https://..."}
 
-# 健康检查（号池可用账号数）
+# Health check (number of available accounts in the pool)
 curl http://127.0.0.1:8000/health
 ```
 
-## 说明
+## Notes
 
-- 硬限制 2 片 / 号 / 天，号池越大吞吐越高。
-- API Key 支持每日任务上限、同时生成上限、允许时长和过期时间；配置为 0 表示不限。
-- 任务会记录 API Key 名称、客户级用量和实际使用账号；服务端待处理任务上限由 `DOLA_MAX_PENDING_TASKS` 控制，默认 100。
-- `video_url` 是 dola CDN 临时链接（约数小时过期），正式分发需在 `_run_task` 里下载转存到自己的 OSS/对象存储。
-- cookie 有效期约 60 天，过期需重新登录更新 `cookies.txt`。
-- 国内版 doubao.com 对 Python HTTP 客户端有风控，本服务只跑国际版 dola.com。
+- Hard limit of 2 videos / account / day; the larger the pool, the higher the throughput.
+- API Keys support a daily task limit, a concurrent-generation limit, allowed durations, and an expiry time; a value of 0 means unlimited.
+- Tasks record the API Key name, customer-level usage, and the actual account used; the server-side pending-task limit is controlled by `DOLA_MAX_PENDING_TASKS` (default 100).
+- `video_url` is a temporary dola CDN link (expires in a few hours); for proper distribution you must download and re-host it to your own OSS/object storage inside `_run_task`.
+- Cookies are valid for about 60 days; when they expire you must log in again and update `cookies.txt`.
+- The domestic version doubao.com applies risk controls against Python HTTP clients, so this service only runs against the international dola.com.
 
-## 依赖的 Dola 扩展（`extensions/dola30/`）
+## Required Dola extension (`extensions/dola30/`)
 
-`30 秒时长` 与 `无水印解析` 依赖一个第三方 Chromium 扩展（unpacked），已随仓库一起分发。
-运行时行为：
+`30-second duration` and `watermark-free parsing` depend on a third-party Chromium extension (unpacked), which is distributed together with the repository.
+Runtime behavior:
 
-- `duration=30` 需要该扩展；缺失时 `browser.py` 抛 `Dola 扩展目录不存在`；
-- 设 `DOLA_EXTENSION_ENABLED=0` 可关闭扩展加载路径，只跑网页端原生支持的 5/10 秒；
-- 路径可用 `DOLA_EXTENSION_DIR` 覆盖（默认 `extensions/dola30`）；
-- `dola-skill-pack-response.json` / `doubao-skill-pack-response.json` 是扩展拦截并伪造 skill-pack 响应所需的固定数据，删掉会导致时长解锁失效。
+- `duration=30` requires this extension; when it is missing, `browser.py` raises `Dola extension directory does not exist`;
+- Setting `DOLA_EXTENSION_ENABLED=0` disables the extension-loading path and runs only the 5/10-second durations natively supported by the web UI;
+- The path can be overridden with `DOLA_EXTENSION_DIR` (default `extensions/dola30`);
+- `dola-skill-pack-response.json` / `doubao-skill-pack-response.json` are the fixed data the extension needs in order to intercept and forge the skill-pack response; deleting them breaks duration unlocking.
 
 
-## 免责声明
+## Disclaimer
 
-本仓库是个人学习与互操作性研究记录，包含对上游网页接口的逆向实现；代码不含任何账号、cookie、密钥或可用凭据。`extensions/dola30/` 为第三方扩展，按购买者意愿随仓库附带，其授权与使用权归原作者，使用者自行评估账号与合规风险。
+This repository is a record of personal learning and interoperability research, and contains a reverse-engineered implementation of the upstream web interface; the code contains no accounts, cookies, keys, or usable credentials. `extensions/dola30/` is a third-party extension included with the repository at the buyer's discretion; its licensing and usage rights belong to the original author, and users must assess account and compliance risks themselves.

@@ -1,10 +1,12 @@
-"""滑块验证码探针：走 dola 真实 UI 发送消息，触发并抓取滑块验证码的结构。
+"""Slider captcha probe: send a message through dola's real UI to trigger and capture the structure of the slider captcha.
 
-背景：页面内裸 fetch 提交被 shark 风控 710022004 拦截；前端收到该错误后会弹自己的滑块 UI。
-本脚本用 headful 打开，UI 输入 + 发送，等待验证码弹出，保存截图/DOM/frame 信息供分析。
+Background: a bare in-page fetch submission is blocked by the shark anti-bot with 710022004; on receiving
+that error the frontend pops up its own slider UI.
+This script opens in headful mode, enters and sends text through the UI, waits for the captcha to appear,
+and saves the screenshot/DOM/frame information for analysis.
 
-用法：python captcha_probe.py <账号名>
-产物：captcha_probe.png（截图）、captcha_probe.html（DOM）、控制台 frame 列表
+Usage: python captcha_probe.py <account-name>
+Output: captcha_probe.png (screenshot), captcha_probe.html (DOM), console frame list
 """
 import asyncio
 import sys
@@ -14,20 +16,20 @@ from patchright.async_api import async_playwright
 
 from browser import launch_account_context
 
-PROMPT = "海边日落，浪花拍打沙滩"
+PROMPT = "Seaside sunset, waves lapping the beach"
 
 
 async def dump_state(page, context, tag):
-    """保存截图 + DOM + frame 列表"""
+    """Save screenshot + DOM + frame list"""
     png = Path(f"captcha_probe_{tag}.png")
     html = Path(f"captcha_probe_{tag}.html")
     await page.screenshot(path=str(png), full_page=False)
     try:
         await html.write_text(await page.content(), encoding="utf-8")
     except Exception as e:
-        print(f"  保存 html 失败: {e}")
+        print(f"  Failed to save html: {e}")
     print(f"[{tag}] url={page.url}")
-    print(f"[{tag}] 截图 -> {png}")
+    print(f"[{tag}] screenshot -> {png}")
     frames = page.frames
     print(f"[{tag}] frames({len(frames)}):")
     for f in frames:
@@ -44,28 +46,28 @@ async def main():
         await page.wait_for_timeout(5000)
         await dump_state(page, context, "01_loaded")
 
-        # 找输入框：textarea / contenteditable
+        # Find the input box: textarea / contenteditable
         box = await page.query_selector("textarea")
         input_kind = "textarea"
         if not box:
             box = await page.query_selector('[contenteditable="true"]')
             input_kind = "contenteditable"
         if not box:
-            print("✗ 未找到输入框（登录态可能失效）")
+            print("✗ Input box not found (the login session may have expired)")
             await context.close()
             return
-        print(f"输入框: {input_kind}")
+        print(f"Input box: {input_kind}")
 
         await box.click()
         await page.wait_for_timeout(500)
-        await page.keyboard.type(PROMPT, delay=120)  # 拟人打字
+        await page.keyboard.type(PROMPT, delay=120)  # human-like typing
         await page.wait_for_timeout(800)
         await dump_state(page, context, "02_typed")
 
-        print("按回车发送...")
+        print("Pressing Enter to send...")
         await page.keyboard.press("Enter")
 
-        # 等验证码弹出（最多 30s，每秒检查一次）
+        # Wait for the captcha to appear (up to 30s, checked once per second)
         for i in range(30):
             await page.wait_for_timeout(1000)
             html = await page.content()
@@ -73,10 +75,10 @@ async def main():
             hit = [kw for kw in ("captcha", "verify", "secsdk", "shark", "滑块", "拖动", "slider", "puzzle") if kw in low]
             nframes = len(page.frames)
             if hit or nframes > 1:
-                print(f"t+{i+1}s 疑似验证码出现: keywords={hit} frames={nframes}")
-                await page.wait_for_timeout(2000)  # 等渲染完整
+                print(f"t+{i+1}s possible captcha detected: keywords={hit} frames={nframes}")
+                await page.wait_for_timeout(2000)  # wait for rendering to complete
                 await dump_state(page, context, "03_captcha")
-                # 进一步：在每个 frame 里找 img/canvas
+                # Further: look for img/canvas in each frame
                 for f in page.frames:
                     try:
                         info = await f.evaluate("""() => {
@@ -90,10 +92,10 @@ async def main():
                         pass
                 break
         else:
-            print("30s 内未检测到验证码，dump 最终状态")
+            print("No captcha detected within 30s; dumping the final state")
             await dump_state(page, context, "03_final")
 
-        print("\n保持浏览器 60s 供肉眼观察（可手动操作）...")
+        print("\nKeeping the browser open for 60s for visual inspection (you can operate manually)...")
         await page.wait_for_timeout(60000)
         await context.close()
 

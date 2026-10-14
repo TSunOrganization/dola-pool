@@ -1,6 +1,7 @@
-¶¹°ü15ÃëÎ´¼Ó£¬ÆäËû²»±ä£¬ÄãËù¹ºÂòµÄ×ÊÔ´À´×ÔÏĞÓã¹«¿¼ÉÏ°¶
-ÒÔºóËùÓĞµÄÔ´Âë²úÆ·¾ùÊÊÓÃÓÚ ÓµÓĞ×Ô¼º²úÆ·/¹¤¾ßµÄ²úÆ·ÈË£¬Ò»¸üÒ»ÊÕ·Ñ£¬²»ÊÊºÏ¸öÈË(ÒòÎªºÜ²»»®Ëã)£¬¸öÈËÓÃ½¨Òé×ß·½ÔÃä¯ÀÀÆ÷£¬ÊÇÃâ·ÑµÄ¡£
+The 15-second option for Doubao has not been added; everything else stays the same. The resource you purchased comes from Xianyu's "civil-service-exam-success" (å…¬è€ƒä¸Šå²¸).
+From now on, all source-code products are aimed at product builders who own their own product/tool: each update is charged separately, so they are not suitable for individuals (because it is very uneconomical). For personal use, we recommend Fangyue Browser (æ–¹æ‚¦æµè§ˆå™¨), which is free.
 
-1¡¢²å¼şÈç¹ûÒªÓÃµ½ÎŞºÛÄ£Ê½£¬Çëµ½²å¼şÏêÇéÒ³£¬°Ñ"ÓÃÓÚÎŞºÛÄ£Ê½"¹´Ñ¡ÉÏ¡£
-2¡¢dolaµÄ30ÃëÔÚĞÂ¶Ô»°Ê±¾¡Á¿²»Òª´ø "XXÃë","X~XÃë"µÈÕâÀà´Ê£¬¿ÉÄÜ»áÌáÊ¾ÎŞ·¨Éú³É£¬ºóĞø¿É´øÉÏ£¬Õâ¸ö×ÔĞĞ¼ì²é¡£
-3¡¢dolaµÄÊÓÆµË®Ó¡ÓĞÊ±ºòÃ»ÓĞ£¬¸ÅÂÊºÜĞ¡£¬³öÏÖµÄ»°Ë¢ĞÂÏÂÒ³Ãæ£¬»¹²»ĞĞ´ú±í×ÊÔ´Ã»ÓĞÎŞË®Ó¡½âÎö¡£
+1. If the plugin needs to be used in incognito mode, go to the plugin details page and tick "Allow in incognito".
+2. When starting a new conversation for Dola's 30 seconds, try not to include words like "XX seconds" or "X~X seconds", as it may report that generation is not possible; you can add them afterwards â€” check this yourself.
+3. Dola's videos sometimes have no watermark; the probability is very small. If it happens, refresh the page; if it still does not work, it means the resource has no watermark-free parsing available.
+
