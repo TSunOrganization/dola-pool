@@ -245,7 +245,7 @@ async function inspectChainSingleResponse(tabId, event, source) {
     await sendToTab(tabId, {
       type: "MEDIA_STATUS",
       sourceKey,
-      text: "未提取到资源"
+      text: "No media extracted"
     });
   }
 
@@ -690,6 +690,8 @@ function patchDurationSelector(value, seen = new Set()) {
   const label = String(value.label || value.display_text || value.show_name || "");
   const selectorKey = String(value.key || value.value || "");
   const options = Array.isArray(value.option_list) ? value.option_list : [];
+  // NOTE: the Chinese/Japanese literals below are matched against upstream
+  // (Doubao/Dola) response labels, so they are intentionally left untranslated.
   const looksLikeDuration = selectorKey === "video-duration"
     || selectorKey === "duration"
     || /时长|鏃堕暱|時間|長さ|duration/i.test(label)

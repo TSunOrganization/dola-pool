@@ -1,4 +1,4 @@
-"""任务状态持久化（SQLite）+ API 密钥管理。单进程 asyncio 服务够用，用锁保护。"""
+"""Task state persistence (SQLite) + API key management. A single-process asyncio service is sufficient; protected with a lock."""
 import datetime
 import hashlib
 import json
@@ -13,11 +13,11 @@ DEFAULT_ALLOWED_DURATIONS = list(SUPPORTED_DURATIONS)
 
 
 class TaskQuotaExceeded(RuntimeError):
-    """API Key 达到每日任务额度。"""
+    """The API key has reached its daily task quota."""
 
 
 class PendingTaskLimitExceeded(RuntimeError):
-    """服务端待处理任务总数达到上限。"""
+    """The server's total number of pending tasks has reached the limit."""
 
 
 class TaskStore:
@@ -56,7 +56,7 @@ class TaskStore:
                 )
                 """
             )
-            # 旧库兼容：逐列补齐任务恢复、客户用量和耗时统计字段。
+            # Backward compatibility for old databases: add task-recovery, client-usage, and timing-stats columns one by one.
             for column, definition in (
                 ("account", "TEXT"),
                 ("conversation_id", "TEXT"),
@@ -89,7 +89,7 @@ class TaskStore:
                 )
                 """
             )
-            # 旧库兼容：给已经存在的 API Key 增加客户级策略字段。
+            # Backward compatibility for old databases: add client-level policy fields to existing API keys.
             for column, definition in (
                 ("daily_limit", "INTEGER DEFAULT 0"),
                 ("concurrency_limit", "INTEGER DEFAULT 0"),
@@ -162,7 +162,7 @@ class TaskStore:
                 ).fetchone()[0]
                 if pending >= max_pending:
                     raise PendingTaskLimitExceeded(
-                        f"待处理任务已达到服务上限（{max_pending}）"
+                        f"Pending tasks have reached the service limit ({max_pending})"
                     )
             if daily_limit > 0 and api_key_hash:
                 day = datetime.date.today().isoformat()
@@ -173,7 +173,7 @@ class TaskStore:
                 ).fetchone()[0]
                 if used >= daily_limit:
                     raise TaskQuotaExceeded(
-                        f"API Key 今日额度已用完（{daily_limit} 个任务）"
+                        f"API key daily quota exhausted ({daily_limit} tasks)"
                     )
             self._conn.execute(
                 "INSERT INTO tasks ("
@@ -216,7 +216,7 @@ class TaskStore:
         return dict(row) if row else None
 
     def get_for_client(self, task_id, api_key_hash: str | None):
-        """只返回属于当前 API Key 的任务；匿名开发模式按 NULL hash 隔离。"""
+        """Return only tasks belonging to the current API key; anonymous development mode is isolated by NULL hash."""
         with _LOCK:
             if api_key_hash:
                 row = self._conn.execute(
@@ -231,7 +231,7 @@ class TaskStore:
         return dict(row) if row else None
 
     def recoverable_tasks(self) -> list:
-        """服务重启后恢复已拿到 conversation_id 的任务，不重复提交 prompt。"""
+        """After a service restart, resume tasks that already have a conversation_id, without resubmitting the prompt."""
         with _LOCK:
             rows = self._conn.execute(
                 "SELECT * FROM tasks WHERE status IN ('queued','processing') "
@@ -241,7 +241,7 @@ class TaskStore:
         return [dict(r) for r in rows]
 
     def recoverable_queued_tasks(self) -> list:
-        """服务重启后恢复尚未拿到 conversation_id 的 queued 任务。"""
+        """After a service restart, resume queued tasks that have not yet obtained a conversation_id."""
         with _LOCK:
             rows = self._conn.execute(
                 "SELECT * FROM tasks WHERE status='queued' "
@@ -291,7 +291,7 @@ class TaskStore:
         }
 
     def stats(self) -> dict:
-        """今日完成/失败、成功率、近 7 日趋势、各号累计出片。"""
+        """Today's completed/failed counts, success rate, last-7-day trend, and cumulative videos produced per account."""
         days = [(datetime.date.today() - datetime.timedelta(days=i)).isoformat()
                 for i in range(6, -1, -1)]
         with _LOCK:
@@ -405,7 +405,7 @@ class TaskStore:
         return not row["expires_at"] or row["expires_at"] > time.time()
 
     def touch_key(self, key: str, min_interval: float = 60):
-        """节流更新 last_used_at。"""
+        """Throttle updates to last_used_at."""
         now = time.time()
         with _LOCK:
             row = self._conn.execute(

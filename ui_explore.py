@@ -1,9 +1,9 @@
-"""探索「创建视频」UI 流程：入口 -> 控件 -> 发送 -> 抓前端真实请求。
+"""Explore the "Create video" UI flow: entry -> controls -> send -> capture the real frontend request.
 
-目的：
-1. 摸清视频创建面板的 DOM（比例/时长/模型选项）
-2. 抓前端真实 /chat/completion 请求的 query/headers/body，与 SUBMIT_JS 对比
-3. 确认 UI 视频流是否触发滑块
+Goals:
+1. Map out the DOM of the video creation panel (ratio/duration/model options)
+2. Capture the query/headers/body of the real frontend /chat/completion request to compare with SUBMIT_JS
+3. Confirm whether the UI video flow triggers a slider
 """
 import asyncio
 import json
@@ -13,7 +13,7 @@ from patchright.async_api import async_playwright
 
 from browser import launch_account_context
 
-PROMPT = "一只橘猫在窗台上打盹，阳光洒进来"
+PROMPT = "An orange tabby cat dozing on the windowsill, sunlight streaming in"
 CAPTURE = {}
 
 
@@ -41,30 +41,30 @@ async def main():
         await page.goto("https://www.dola.com/chat", timeout=60000, wait_until="domcontentloaded")
         await page.wait_for_timeout(5000)
 
-        print("点击「创建视频」...")
-        await page.click("text=動画を作成")
+        print("Clicking \"Create video\"...")
+        await page.click("text=動画を作成")  # "動画を作成" = Japanese for "Create video"; keep the literal, it selects a Dola UI element
         await page.wait_for_timeout(2500)
         await page.screenshot(path="ui_01_panel.png")
 
-        # dump 输入区附近的可见控件文本
+        # Dump the text of visible controls near the input area
         controls = await page.evaluate("""() => {
             const els = [...document.querySelectorAll('button, [role="button"], [class*="chip"], [class*="option"], [class*="select"]')];
             return els.map(e => (e.textContent||'').trim()).filter(t => t && t.length < 30).slice(0, 80);
         }""")
-        print("控件文本:", json.dumps(controls, ensure_ascii=False))
+        print("Control text:", json.dumps(controls, ensure_ascii=False))
 
-        # 找输入框
+        # Find the input box
         box = await page.query_selector("textarea") or await page.query_selector('[contenteditable="true"]')
-        print("输入框:", "textarea" if await page.query_selector("textarea") else "contenteditable")
+        print("Input box:", "textarea" if await page.query_selector("textarea") else "contenteditable")
         await box.click()
         await page.keyboard.type(PROMPT, delay=100)
         await page.wait_for_timeout(1000)
         await page.screenshot(path="ui_02_typed.png")
 
-        print("回车发送...")
+        print("Pressing Enter to send...")
         await page.keyboard.press("Enter")
 
-        # 等：URL 变化 / 验证码 / 15s
+        # Wait for: URL change / captcha / 15s
         for i in range(20):
             await page.wait_for_timeout(1000)
             if CAPTURE.get("url"):
@@ -76,19 +76,19 @@ async def main():
         if CAPTURE.get("url"):
             from urllib.parse import urlparse, parse_qs
             q = parse_qs(urlparse(CAPTURE["url"]).query)
-            print("\n=== 前端真实请求 query 参数 ===")
+            print("\n=== Real frontend request query params ===")
             print(json.dumps({k: v[0] for k, v in q.items()}, ensure_ascii=False, indent=1))
-            print("\n=== headers（除 cookie）===")
+            print("\n=== headers (except cookie) ===")
             print(json.dumps(CAPTURE["headers"], ensure_ascii=False, indent=1))
             body = json.loads(CAPTURE["post"])
-            print("\n=== body 关键字段 ===")
+            print("\n=== key body fields ===")
             print("chat_ability:", json.dumps(body.get("chat_ability"), ensure_ascii=False))
             print("ext:", json.dumps(body.get("ext"), ensure_ascii=False))
             texts = [b.get("content", {}).get("text_block", {}).get("text", "")
                      for m in body.get("messages", []) for b in m.get("content_block", [])]
             print("message text:", texts)
         else:
-            print("✗ 未捕获到 /chat/completion 请求")
+            print("✗ Did not capture a /chat/completion request")
 
         await page.wait_for_timeout(8000)
         await page.screenshot(path="ui_04_after.png")

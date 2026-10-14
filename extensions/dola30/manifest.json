@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "豆包 Dola 15秒去水印助手",
+  "name": "Doubao Dola 15-Second Watermark Remover",
   "version": "1.0.0",
-  "description": "支持15秒配置，并提取豆包和 Dola 的无水印图片、视频资源。",
+  "description": "Supports 15-second configuration and extracts watermark-free image and video resources from Doubao and Dola.",
   "permissions": [
     "debugger",
     "tabs",
@@ -29,6 +29,6 @@
     }
   ],
   "action": {
-    "default_title": "豆包 Dola 15秒去水印助手"
+    "default_title": "Doubao Dola 15-Second Watermark Remover"
   }
 }

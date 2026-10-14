@@ -1,11 +1,11 @@
-"""dola-pool OpenAI 兼容视频服务（FastAPI）+ 管理面板后端。
+"""dola-pool OpenAI-compatible video service (FastAPI) + admin panel backend.
 
-对外协议（异步两段式）：
+Public protocol (asynchronous two-phase):
   POST /v1/videos/generations   -> {"id","status","model","prompt"}
   GET  /v1/videos/{id}          -> {"id","status","video_url","error"}
-  GET  /videos/<file>           -> 出片转存静态服务
+  GET  /videos/<file>           -> static service for stored generated videos
 
-管理面板：GET / -> web/index.html；管理接口 /api/admin/*。
+Admin panel: GET / -> web/index.html; admin endpoints /api/admin/*.
 """
 import asyncio
 import hashlib
@@ -37,7 +37,7 @@ pool = BrowserPool(max_concurrency=config.MAX_CONCURRENCY)
 
 app.mount("/videos", StaticFiles(directory=config.DOWNLOAD_DIR), name="videos")
 
-# 后台 jobs（加号/验证），内存态
+# Background jobs (account add / verify), in-memory state
 JOBS: dict[str, dict] = {}
 
 SIZE_TO_RATIO = {
@@ -50,7 +50,7 @@ NAME_RE = re.compile(r"^[A-Za-z0-9_-]{1,32}$")
 
 
 class KeyConcurrencyLimiter:
-    """按 API Key 限制同时运行的任务；0 表示不限。"""
+    """Limit concurrently running tasks per API key; 0 means unlimited."""
 
     def __init__(self):
         self._condition = asyncio.Condition()
@@ -79,7 +79,7 @@ class KeyConcurrencyLimiter:
 key_limiter = KeyConcurrencyLimiter()
 
 
-# ===== 鉴权 =====
+# ===== Authentication =====
 
 
 def _hash_key(key: str) -> str:
@@ -89,7 +89,7 @@ def _hash_key(key: str) -> str:
 def _anonymous_client() -> dict:
     return {
         "api_key_hash": None,
-        "api_key_name": "匿名调用",
+        "api_key_name": "anonymous call",
         "daily_limit": 0,
         "concurrency_limit": 0,
         "allowed_durations": list(SUPPORTED_DURATIONS),
@@ -99,7 +99,7 @@ def _anonymous_client() -> dict:
 def _env_client(key: str) -> dict:
     return {
         "api_key_hash": _hash_key(key),
-        "api_key_name": f"环境变量 Key ({key[:8]}…)",
+        "api_key_name": f"Environment variable key ({key[:8]}…)",
         "daily_limit": 0,
         "concurrency_limit": 0,
         "allowed_durations": list(SUPPORTED_DURATIONS),
@@ -107,7 +107,7 @@ def _env_client(key: str) -> dict:
 
 
 def _auth(authorization):
-    """返回本次调用的客户策略；没有任何 Key 配置时保持开发模式免鉴权。"""
+    """Return the client policy for this call; when no key is configured at all, stay in unauthenticated development mode."""
     if not config.API_KEYS and not store.has_enabled_keys():
         return _anonymous_client()
     if not authorization or not authorization.startswith("Bearer "):
@@ -123,7 +123,7 @@ def _auth(authorization):
     store.touch_key(key)
     return {
         "api_key_hash": _hash_key(key),
-        "api_key_name": record["name"] or "未命名客户",
+        "api_key_name": record["name"] or "unnamed client",
         "daily_limit": record["daily_limit"],
         "concurrency_limit": record["concurrency_limit"],
         "allowed_durations": record["allowed_durations"],
@@ -143,13 +143,13 @@ def _normalize_allowed_durations(values) -> list[int]:
     try:
         normalized = sorted({int(value) for value in values})
     except (TypeError, ValueError):
-        raise HTTPException(422, "allowed_durations 必须是 10、15、30 的数组")
+        raise HTTPException(422, "allowed_durations must be an array of 10, 15, 30")
     if not normalized or any(value not in SUPPORTED_DURATIONS for value in normalized):
-        raise HTTPException(422, "allowed_durations 只能包含 10、15、30，且至少选择一个")
+        raise HTTPException(422, "allowed_durations may only contain 10, 15, 30, and at least one must be selected")
     return normalized
 
 
-# ===== 客户 API =====
+# ===== Client API =====
 
 
 class VideoGenRequest(BaseModel):
@@ -158,7 +158,7 @@ class VideoGenRequest(BaseModel):
     size: str | None = None
     ratio: str | None = None
     duration: int | None = Field(None, ge=10, le=30)
-    # 对外只接受固定时长 10/15/30，具体集合在接口逻辑中校验。
+    # Only fixed durations 10/15/30 are accepted externally; the exact set is validated in the endpoint logic.
     reference_images: list[str] = Field(default_factory=list)
 
 
@@ -251,10 +251,10 @@ async def _resume_task(row: dict):
 
 
 def _task_client(row: dict) -> dict:
-    """从任务快照恢复调度所需的客户上下文，不依赖 Key 当前是否仍存在。"""
+    """Restore the client context needed for scheduling from the task snapshot, without depending on whether the key still exists."""
     return {
         "api_key_hash": row.get("api_key_hash"),
-        "api_key_name": row.get("api_key_name") or "历史任务",
+        "api_key_name": row.get("api_key_name") or "historical task",
         "daily_limit": 0,
         "concurrency_limit": int(row.get("client_concurrency_limit") or 0),
         "allowed_durations": list(SUPPORTED_DURATIONS),
@@ -271,7 +271,7 @@ def _task_reference_images(raw) -> list[str]:
 
 @app.on_event("startup")
 async def resume_incomplete_tasks():
-    """服务重启后恢复已受理会话，并重新排队尚未开始的 queued 任务。"""
+    """After a service restart, resume accepted sessions and re-queue queued tasks that have not started yet."""
     for row in store.recoverable_tasks():
         asyncio.create_task(_resume_task(row))
     for row in store.recoverable_queued_tasks():
@@ -289,25 +289,26 @@ async def create_video(req: VideoGenRequest, authorization: str | None = Header(
     client = _auth(authorization)
     duration = req.duration or 10
     if duration not in SUPPORTED_DURATIONS:
-        raise HTTPException(422, "当前固定支持 10 秒、15 秒和 30 秒视频")
+        raise HTTPException(422, "Currently only 10-second, 15-second, and 30-second videos are supported")
     if duration not in client["allowed_durations"]:
-        raise HTTPException(422, f"当前 API Key 不允许生成 {duration} 秒视频")
+        raise HTTPException(422, f"The current API key is not allowed to generate {duration}-second videos")
     model_key = req.model.lower().replace("-", "_")
     if model_key not in (
         "seedance_2.0", "seedance_2.5", "seedance_v2.0", "seedance_v2.5",
         "seedance_20", "seedance_25", "seedance_v20", "seedance_v25",
     ):
-        raise HTTPException(422, "当前支持的模型为 seedance-2.0 和 seedance-2.5")
+        raise HTTPException(422, "The currently supported models are seedance-2.0 and seedance-2.5")
     try:
         reference_images = await validate_reference_urls(req.reference_images)
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
-    # 账号暂时忙时允许任务进入 queued，由 BrowserPool 的全局并发控制实际排队。
-    # 只有明确全部达到每日上限/积分不足时才立即拒绝。
+    # When accounts are temporarily busy, allow the task to enter queued; actual queuing is handled
+    # by BrowserPool's global concurrency control. Reject immediately only when it is clear that all
+    # accounts have hit the daily limit / have insufficient credits.
     if not pool.available and pool.all_accounts_limited:
-        raise HTTPException(429, "账号限流：所有已开启调度的账号均已达到 Dola 每日视频上限，请明天再试")
+        raise HTTPException(429, "Account rate limit: all accounts with scheduling enabled have reached the Dola daily video limit; please try again tomorrow")
     if not pool.available and pool.all_accounts_quota_blocked:
-        raise HTTPException(429, "积分不足：所有已开启调度的账号都没有足够积分，请等待额度刷新")
+        raise HTTPException(429, "Insufficient credits: all accounts with scheduling enabled lack sufficient credits; please wait for the quota to refresh")
     if not pool.accounts:
         raise HTTPException(503, "no account in pool")
     task_id = "video_" + uuid.uuid4().hex
@@ -359,7 +360,7 @@ async def health():
     }
 
 
-# ===== 管理面板 API =====
+# ===== Admin panel API =====
 
 
 class AdminLogin(BaseModel):
@@ -561,6 +562,6 @@ async def admin_key_delete(key: str, x_admin_key: str | None = Header(default=No
     return {"ok": True}
 
 
-# 面板单文件前端（放最后，保证上面的路由优先）
+# Panel single-file frontend (placed last so the routes above take precedence)
 app.mount("/", StaticFiles(directory="web", html=True), name="web")
 

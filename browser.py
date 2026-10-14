@@ -1,7 +1,8 @@
-"""patchright persistent context 统一启动：显式代理 + 反检测参数。
+"""Unified startup for the patchright persistent context: explicit proxy + anti-detection args.
 
-代理必须显式传（不依赖系统代理——系统代理规则变化曾把 dola 分流到直连被墙，
-见 DEVELOPMENT.md 第 5 节）。所有需要打开 dola 的脚本都走这里。
+The proxy must be passed explicitly (do not rely on the system proxy — a change in system proxy
+rules once routed dola to a direct connection that got blocked; see DEVELOPMENT.md section 5).
+All scripts that need to open dola go through here.
 """
 from pathlib import Path
 
@@ -16,25 +17,25 @@ LAUNCH_ARGS = [
 
 
 async def launch_account_context(p, account: str, headless: bool = None, use_extension: bool = False):
-    """启动 accounts/<account> profile，返回 BrowserContext。调用方负责 close。
+    """Launch the accounts/<account> profile and return the BrowserContext. The caller is responsible for close.
 
-    p: async_playwright() 实例
-    headless: None = 用 config.HEADLESS
+    p: async_playwright() instance
+    headless: None = use config.HEADLESS
     """
     profile_dir = Path("accounts") / account
     if not profile_dir.exists():
         raise FileNotFoundError(
-            f"账号 profile 不存在: {profile_dir}（先跑 python login.py {account}）"
+            f"Account profile does not exist: {profile_dir} (run python login.py {account} first)"
         )
     launch_headless = config.HEADLESS if headless is None else headless
     args = list(LAUNCH_ARGS)
     if use_extension:
         if not config.EXTENSION_ENABLED:
-            raise RuntimeError("Dola 扩展已禁用（DOLA_EXTENSION_ENABLED=0）")
+            raise RuntimeError("Dola extension is disabled (DOLA_EXTENSION_ENABLED=0)")
         extension_dir = Path(config.EXTENSION_DIR).resolve()
         if not extension_dir.exists():
-            raise FileNotFoundError(f"Dola 扩展目录不存在: {extension_dir}")
-        # Chrome debugger API 扩展需要有头模式；扩展会拦截 skill/action-bar 响应。
+            raise FileNotFoundError(f"Dola extension directory does not exist: {extension_dir}")
+        # The Chrome debugger API extension requires headed mode; the extension intercepts skill/action-bar responses.
         launch_headless = False
         args.extend([
             f"--disable-extensions-except={extension_dir}",
@@ -52,13 +53,13 @@ async def launch_account_context(p, account: str, headless: bool = None, use_ext
 
 
 def cookie_value(cookies: list, name: str) -> str:
-    """从 context.cookies() 结果里取指定 cookie 的值"""
+    """Get the value of the specified cookie from the context.cookies() result"""
     return next((c["value"] for c in cookies if c["name"] == name and c["value"]), "")
 
 async def check_login_state(account: str) -> bool:
-    """无头打开 dola，返回登录态是否有效（sessionid + 输入框存在）。
+    """Open dola headless and return whether the login session is valid (sessionid + input box present).
 
-    供 verify_login.py CLI 与面板「验证」按钮共用。
+    Shared by the verify_login.py CLI and the panel's "Verify" button.
     """
     from patchright.async_api import async_playwright
     async with async_playwright() as p:

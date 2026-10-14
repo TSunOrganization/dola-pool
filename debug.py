@@ -1,4 +1,4 @@
-"""调试：打印 dola /chat/completion 的原始响应（状态码 + 前 N 字节 SSE）"""
+"""Debug: print the raw response from dola /chat/completion (status code + first N bytes of SSE)"""
 import asyncio
 import aiohttp
 
@@ -10,7 +10,7 @@ async def main():
         cookie = next(l.strip() for l in f if l.strip() and not l.startswith("#"))
 
     client = DolaClient(cookie)
-    body = client._build_video_body("一只猫追蝴蝶", "9:16", 3)
+    body = client._build_video_body("A cat chasing butterflies", "9:16", 3)
 
     async with aiohttp.ClientSession(trust_env=True) as session:
         url = f"{client.api_base}/chat/completion"
@@ -34,7 +34,7 @@ async def main():
                         break
             except Exception as e:
                 print("READ ERR:", e)
-            print("===== RAW SSE (前4000字节) =====")
+            print("===== RAW SSE (first 4000 bytes) =====")
             print(buf.decode("utf-8", errors="replace"))
 
 

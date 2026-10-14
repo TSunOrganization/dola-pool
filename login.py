@@ -1,9 +1,10 @@
-"""dola 账号登录态采集工具。
+"""Tool for capturing a dola account's login session.
 
-用法：python login.py <账号名>
-打开浏览器访问 dola.com，你手动完成 Google 登录。
-检测到登录态（sessionid）后自动保存 profile 到 accounts/<账号名>/ 并关闭浏览器。
-之后 video_worker 复用这个 profile，无需重新登录。
+Usage: python login.py <account-name>
+Opens a browser to dola.com; you complete the Google login manually.
+Once the login session (sessionid) is detected, the profile is automatically saved to
+accounts/<account-name>/ and the browser is closed.
+Afterward video_worker reuses this profile, so no re-login is needed.
 """
 import asyncio
 import sys
@@ -32,20 +33,20 @@ async def main():
         context = await p.chromium.launch_persistent_context(str(profile_dir), **kwargs)
         page = context.pages[0] if context.pages else await context.new_page()
         await page.goto("https://www.dola.com/chat", timeout=60000)
-        print(f"[{account}] 浏览器已打开，请在窗口里完成 Google 登录（登进 dola 即可）...")
+        print(f"[{account}] Browser opened; please complete the Google login in the window (just get into dola)...")
 
-        # 轮询检测登录态：dola.com 域下出现 sessionid
-        for _ in range(180):  # 最长 15 分钟
+        # Poll for the login session: sessionid appears under the dola.com domain
+        for _ in range(180):  # up to 15 minutes
             cookies = await context.cookies("https://www.dola.com")
             if any(c["name"] == "sessionid" and c["value"] for c in cookies):
-                print(f"[{account}] 检测到登录态 sessionid，等待 session 完全写入...")
+                print(f"[{account}] Login session (sessionid) detected; waiting for the session to be fully written...")
                 await page.wait_for_timeout(4000)
                 await context.close()
-                print(f"[{account}] OK，profile 已保存到 {profile_dir}")
+                print(f"[{account}] OK, profile saved to {profile_dir}")
                 return
             await page.wait_for_timeout(5000)
 
-        print(f"[{account}] 15 分钟内未检测到登录，已退出，请重跑本脚本")
+        print(f"[{account}] No login detected within 15 minutes; exiting, please rerun this script")
         await context.close()
 
 

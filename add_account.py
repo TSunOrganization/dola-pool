@@ -1,9 +1,9 @@
-"""自动添加账号：Google OAuth 自动登录（邮箱----密码----TOTP 密钥），存 profile。
+"""Automatically add an account: automated Google OAuth login (email----password----TOTP secret), saving the profile.
 
-用法：python add_account.py <账号名> "email----password----totp_secret"
+Usage: python add_account.py <account_name> "email----password----totp_secret"
 
-只登录存 profile，不发送任何视频请求。失败抛 RuntimeError（供面板 jobs 捕获）。
-Google 页有反自动化检测，用 headful 提高成功率；失败会截图 dbg_add_account.png。
+Only logs in and saves the profile; it sends no video requests. Raises RuntimeError on failure (caught by the panel's jobs).
+Google pages have anti-automation detection; use headful mode to improve the success rate; on failure it screenshots dbg_add_account.png.
 """
 import asyncio
 import base64
@@ -21,7 +21,7 @@ import config
 
 
 def totp(secret: str, period: int = 30, digits: int = 6) -> str:
-    """标准 TOTP（RFC 6238），Google Authenticator 兼容。"""
+    """Standard TOTP (RFC 6238), compatible with Google Authenticator."""
     secret = secret.replace(" ", "").upper()
     key = base64.b32decode(secret + "=" * ((8 - len(secret) % 8) % 8))
     counter = int(time.time() // period)
@@ -32,38 +32,38 @@ def totp(secret: str, period: int = 30, digits: int = 6) -> str:
 
 
 async def google_login(g, email: str, password: str, secret: str):
-    """状态机跑完 Google 登录：选账号/邮箱/密码/2FA/授权同意页/年龄确认，直到离开 accounts.google.com。"""
+    """State machine that completes the Google login: account chooser/email/password/2FA/consent page/age confirmation, until it leaves accounts.google.com."""
     for step in range(12):
         await g.wait_for_timeout(2500)
         if "accounts.google.com" not in g.url:
-            print("[google] 已离开 Google 域（OAuth 回跳）", flush=True)
+            print("[google] left the Google domain (OAuth redirect back)", flush=True)
             return
-        # 1) 选择账号页（严格用 URL 判定，同意页也显示邮箱会误判）
+        # 1) Account chooser page (decided strictly by URL; the consent page also shows the email and would cause a false match)
         if "accountchooser" in g.url:
             acc = g.locator(f"text={email}").first
             if await acc.count() and await acc.is_visible():
                 await acc.click(timeout=5000)
-                print("[google] 选择账号页 → 点账号", flush=True)
+                print("[google] account chooser page -> clicking account", flush=True)
                 continue
-        # 2) 邮箱页：Google 在跳转过渡时会保留一个隐藏的 identifierId，必须只处理可见输入框。
+        # 2) Email page: during transition Google keeps a hidden identifierId, so only visible input fields must be handled.
         identifier = g.locator("#identifierId").first
         if await identifier.count() and await identifier.is_visible():
             await identifier.fill(email)
-            # Google 新版页面偶尔有过渡层拦截鼠标，DOM click 可安全触发同一提交事件。
+            # On Google's newer pages a transition overlay occasionally intercepts the mouse; a DOM click safely triggers the same submit event.
             await g.locator("#identifierNext").evaluate("e => e.click()")
-            print("[google] 邮箱页 → 提交", flush=True)
+            print("[google] email page -> submitting", flush=True)
             await g.wait_for_timeout(1500)
             continue
-        # 3) 密码页
+        # 3) Password page
         pwd = g.locator('input[name="Passwd"]').first
         if await pwd.count() and await pwd.is_visible():
             await g.wait_for_timeout(600)
             await pwd.fill(password)
             await g.locator("#passwordNext").evaluate("e => e.click()")
-            print("[google] 密码页 → 提交", flush=True)
+            print("[google] password page -> submitting", flush=True)
             await g.wait_for_timeout(1500)
             continue
-        # 4) 授权同意页（继续/続行/Continue）——优先于 2FA 检测，同意页无输入框
+        # 4) OAuth consent page (继续/続行/Continue) -- checked before 2FA; the consent page has no input fields
         clicked = False
         for sel in ["#submit_button",
                     "[role='button']:has-text('続行')", "button:has-text('続行')",
@@ -73,23 +73,23 @@ async def google_login(g, email: str, password: str, secret: str):
                 loc = g.locator(sel).first
                 if await loc.count() and await loc.is_visible():
                     await loc.click(timeout=3000)
-                    print(f"[google] 同意页 → 点击 {sel}", flush=True)
+                    print(f"[google] consent page -> clicking {sel}", flush=True)
                     clicked = True
                     break
             except Exception:
                 continue
         if clicked:
             continue
-        # 5) 2FA 页
+        # 5) 2FA page
         if await g.locator('input[type="tel"]').count():
             if not secret:
-                raise RuntimeError("Google 要求两步验证，但未提供 TOTP 密钥")
+                raise RuntimeError("Google requires two-step verification, but no TOTP secret was provided")
             code = totp(secret)
-            print(f"[google] 2FA 页 → TOTP={code}", flush=True)
+            print(f"[google] 2FA page -> TOTP={code}", flush=True)
             await g.fill('input[type="tel"]', code)
             await g.click("#totpNext")
             continue
-        # 6) dola 年龄确认弹窗（18+）——JS 直接派发点击，绕过选择器匹配问题
+        # 6) dola age-confirmation modal (18+) -- dispatch the click directly via JS to bypass selector-matching issues
         if await g.locator("text=18").count():
             ok = await g.evaluate("""() => {
                 const els = [...document.querySelectorAll('button, [role="button"], div, span')];
@@ -97,18 +97,18 @@ async def google_login(g, email: str, password: str, secret: str):
                 if (t) { t.click(); return true; }
                 return false;
             }""")
-            print(f"[dola] 年龄确认 → JS click OK = {ok}", flush=True)
+            print(f"[dola] age confirmation -> JS click OK = {ok}", flush=True)
             await g.wait_for_timeout(1500)
             continue
         txt = await g.evaluate("() => (document.body && document.body.innerText || '').slice(0, 300)")
-        print(f"[google] step{step} 未识别页面 url={g.url[:80]} text={txt[:200]}", flush=True)
+        print(f"[google] step{step} unrecognized page url={g.url[:80]} text={txt[:200]}", flush=True)
     if "accounts.google.com" in g.url:
         await g.screenshot(path="dbg_google2.png")
-        raise RuntimeError("Google 登录 12 步内未完成（截图 dbg_google2.png）")
+        raise RuntimeError("Google login did not complete within 12 steps (screenshot dbg_google2.png)")
 
 
 async def add_account_flow(account: str, email: str, password: str, secret: str) -> bool:
-    """完整加号流程；成功返回 True，任何失败抛 RuntimeError。"""
+    """Full add-account flow; returns True on success and raises RuntimeError on any failure."""
     profile_dir = Path("accounts") / account
     profile_dir.mkdir(parents=True, exist_ok=True)
 
@@ -125,10 +125,10 @@ async def add_account_flow(account: str, email: str, password: str, secret: str)
 
             cookies = await context.cookies("https://www.dola.com")
             if any(c["name"] == "sessionid" and c["value"] for c in cookies):
-                print(f"[{account}] 已有登录态，无需登录", flush=True)
+                print(f"[{account}] already logged in, no login needed", flush=True)
                 return True
 
-            # 点登录入口 -> Google 选项（未登录时 dola 会自动弹 semi-modal 登录弹窗）
+            # Click the login entry -> Google option (when logged out, dola automatically shows a semi-modal login dialog)
             try:
                 await page.wait_for_selector(".semi-modal-wrap", timeout=10000)
             except Exception:
@@ -136,27 +136,27 @@ async def add_account_flow(account: str, email: str, password: str, secret: str)
                 await page.wait_for_selector(".semi-modal-wrap", timeout=10000)
             await page.locator("text=Googleで続ける").first.click(timeout=10000)
 
-            # Google 页可能在 popup 或当前 tab
+            # The Google page may be in a popup or the current tab
             await page.wait_for_timeout(3000)
             g = next((pg for pg in context.pages if "accounts.google.com" in pg.url), None)
             if g is None and "accounts.google.com" in page.url:
                 g = page
             if g is None:
                 await page.screenshot(path="dbg_add_account.png")
-                raise RuntimeError("未跳转到 Google 登录页（截图 dbg_add_account.png）")
+                raise RuntimeError("did not navigate to the Google login page (screenshot dbg_add_account.png)")
 
             await google_login(g, email, password, secret)
 
-            # 等 dola 写入 sessionid（OAuth 回跳后）
+            # Wait for dola to write the sessionid (after the OAuth redirect back)
             for _ in range(60):
                 await page.wait_for_timeout(3000)
                 cookies = await context.cookies("https://www.dola.com")
                 if any(c["name"] == "sessionid" and c["value"] for c in cookies):
-                    print(f"[{account}] ✓ 登录成功，sessionid 已写入，profile 保存到 {profile_dir}", flush=True)
+                    print(f"[{account}] ✓ login successful, sessionid written, profile saved to {profile_dir}", flush=True)
                     await page.wait_for_timeout(3000)
                     return True
             await page.screenshot(path="dbg_add_account.png")
-            raise RuntimeError("3 分钟内未拿到 sessionid（截图 dbg_add_account.png）")
+            raise RuntimeError("sessionid not obtained within 3 minutes (screenshot dbg_add_account.png)")
         finally:
             await context.close()
 
@@ -165,7 +165,7 @@ async def main():
     account = sys.argv[1]
     email, password, secret = sys.argv[2].split("----")
     await add_account_flow(account, email, password, secret)
-    print(f"[{account}] 加号完成，跑 verify_login.py {account} 可复核")
+    print(f"[{account}] account added; run verify_login.py {account} to double-check")
 
 
 if __name__ == "__main__":

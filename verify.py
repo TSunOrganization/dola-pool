@@ -1,10 +1,10 @@
-"""dola cookie 验证 + 视频实测工具。
+"""dola cookie verification + video smoke test tool.
 
-用法：
-  python verify.py "完整cookie字符串"    # 直接传 cookie
-  python verify.py                        # 从 cookies.txt 读第一个非注释行
+Usage:
+  python verify.py "full-cookie-string"    # pass the cookie directly
+  python verify.py                         # read the first non-comment line from cookies.txt
 
-前置：环境变量 HTTPS_PROXY 需指向 JP/KR 出口代理（dola.com 地区墙）
+Prerequisite: the HTTPS_PROXY environment variable must point to a JP/KR exit proxy (dola.com geo-block)
 """
 import os
 import sys
@@ -28,23 +28,23 @@ def _load_cookie(argv) -> str:
 async def main():
     cookie = _load_cookie(sys.argv)
     if not cookie:
-        print("未提供 cookie。用法：python verify.py \"<完整cookie>\" 或填 cookies.txt")
+        print("No cookie provided. Usage: python verify.py \"<full-cookie>\" or fill in cookies.txt")
         return
 
     client = DolaClient(cookie)
 
-    print("[1/2] 验证 cookie（chat 探活）...")
+    print("[1/2] Verifying cookie (chat liveness probe)...")
     try:
-        reply = await client.chat([{"role": "user", "content": "用一句话介绍你自己"}])
+        reply = await client.chat([{"role": "user", "content": "Introduce yourself in one sentence"}])
         print(f"      chat OK -> {str(reply)[:100]}")
     except Exception as e:
         print(f"      chat FAIL -> {type(e).__name__}: {e}")
-        print("      cookie 可能失效或代理不通，请检查。")
+        print("      The cookie may be expired or the proxy is not working; please check.")
         return
 
-    print("[2/2] 视频实测（seedance_v2.0 / 3秒 / 9:16）...")
+    print("[2/2] Video smoke test (seedance_v2.0 / 3s / 9:16)...")
     try:
-        url = await client.generate_video("一只猫在草地上追蝴蝶", ratio="9:16", duration=3)
+        url = await client.generate_video("A cat chasing butterflies on the grass", ratio="9:16", duration=3)
         print(f"      video OK -> {url}")
     except Exception as e:
         print(f"      video FAIL -> {type(e).__name__}: {e}")

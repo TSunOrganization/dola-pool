@@ -8,15 +8,15 @@ bgg = cv2.cvtColor(bg, cv2.COLOR_BGR2GRAY)
 ys, xs = np.where(alpha > 50)
 print("piece bbox in canvas: x", xs.min(), xs.max(), "y", ys.min(), ys.max())
 
-# 裁出 piece 有效区域（bbox）
+# Crop out the piece's valid region (bbox)
 x0,x1,y0,y1 = xs.min(), xs.max()+1, ys.min(), ys.max()+1
 piece_c = pg[y0:y1, x0:x1]; alpha_c = alpha[y0:y1, x0:x1]
 
 methods = {}
-# M1: 灰度模板+mask
+# M1: grayscale template + mask
 r = cv2.matchTemplate(bgg, piece_c, cv2.TM_CCOEFF_NORMED, mask=alpha_c)
 _,mv,_,ml = cv2.minMaxLoc(r); methods["gray+mask coeff"] = (ml[0], mv)
-# M2: 边缘（不同阈值）
+# M2: edges (different thresholds)
 pe = cv2.Canny(alpha_c, 50, 150)
 be = cv2.Canny(bgg, 50, 150)
 r = cv2.matchTemplate(be, pe, cv2.TM_CCOEFF_NORMED)
@@ -24,9 +24,9 @@ _,mv,_,ml = cv2.minMaxLoc(r); methods["canny50 coeff"] = (ml[0], mv)
 # M3: ccnorm on edges
 r = cv2.matchTemplate(be, pe, cv2.TM_CCORR_NORMED)
 _,mv,_,ml = cv2.minMaxLoc(r); methods["canny50 corr"] = (ml[0], mv)
-# M4: 暗槽检测——背景减去中值模糊，找暗区
+# M4: dark-slot detection — background minus median blur, find dark regions
 blur = cv2.medianBlur(bgg, 31)
-diff = blur.astype(int) - bgg.astype(int)  # 暗槽处为正
+diff = blur.astype(int) - bgg.astype(int)  # positive at the dark slot
 dark = np.clip(diff, 0, 255).astype(np.uint8)
 _, th = cv2.threshold(dark, 18, 255, cv2.THRESH_BINARY)
 th = cv2.morphologyEx(th, cv2.MORPH_CLOSE, np.ones((9,9),np.uint8))
@@ -41,7 +41,7 @@ methods["dark-slot"] = (best[0] if best else -1, best[4] if best else -1)
 
 for k,v in methods.items(): print(f"{k}: x={v[0]} score={v[1]:.3f}")
 
-# 标注保存
+# Save annotation
 vis = bg.copy()
 for k,(X,sc) in methods.items():
     if X >= 0: cv2.rectangle(vis, (X,120), (X+110,230), (0,0,255), 2)

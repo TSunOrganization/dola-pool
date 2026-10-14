@@ -1,4 +1,4 @@
-"""号池管理：加载 cookie、包装 DolaPool、信号量控制并发。"""
+"""Account pool management: load cookies, wrap DolaPool, control concurrency with a semaphore."""
 import asyncio
 import os
 
