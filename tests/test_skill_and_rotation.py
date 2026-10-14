@@ -70,12 +70,27 @@ def test_daily_limit_from_env():
 
 
 def test_skill_helpers():
-    path = media.write_skill_markdown("# my skill\n", "task1")
-    assert path.name == "skill.md"
+    # inline skill is written to a temp skill.md that the caller cleans up
+    path, root = media.resolve_skill_path("# my skill\n", "task1")
+    assert path is not None and path.name == "skill.md"
     assert path.read_text(encoding="utf-8").startswith("# my skill")
-    shutil.rmtree(path.parent, ignore_errors=True)
-    assert media.resolve_skill_markdown("inline skill") == "inline skill"
-    print("ok: write_skill_markdown / resolve_skill_markdown")
+    assert root == path.parent
+    shutil.rmtree(root, ignore_errors=True)
+
+    # a ready-made skill file is attached directly (no temp copy)
+    tmp = tempfile.mkdtemp()
+    ready = Path(tmp) / "skill.md"
+    ready.write_text("# ready-made skill", encoding="utf-8")
+    old_file, old_enabled = config.SKILL_FILE, config.SKILL_ENABLED
+    config.SKILL_FILE, config.SKILL_ENABLED = str(ready), True
+    try:
+        resolved, cleanup = media.resolve_skill_path(None, "task2")
+        assert resolved == ready and cleanup is None, (resolved, cleanup)
+        config.SKILL_ENABLED = False
+        assert media.default_skill_path() is None
+    finally:
+        config.SKILL_FILE, config.SKILL_ENABLED = old_file, old_enabled
+    print("ok: resolve_skill_path (inline temp file + ready-made file attached directly)")
 
 
 def test_usage_table_migration():

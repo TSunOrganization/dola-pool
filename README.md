@@ -73,8 +73,9 @@ curl -X POST http://127.0.0.1:8000/v1/videos/generations \
        "skill_markdown":"# my skill\n- cinematic, smooth camera motion"}'
 ```
 
-- `skill_markdown` is written to a temporary `skill.md` and attached through Dola's native file input, together with any reference images.
-- If a request omits `skill_markdown`, the file at `DOLA_SKILL_FILE` (default `skills/skill.md`) is attached automatically.
+- Drop your **ready-made `skill.md`** at `DOLA_SKILL_FILE` (default `skills/skill.md`). Every task then attaches that exact file through Dola's native file input (together with any reference images) and types the prompt — the same as attaching the file and pasting the prompt in the chat UI.
+- `skill_markdown` is only an optional override: if a request sends it, that text is written to a temporary `skill.md` and attached instead.
+- Set `DOLA_SKILL_ENABLED=0` to stop attaching the skill file.
 - Run in skill mode with `DOLA_DAILY_LIMIT=10` and provide several exits in `DOLA_PROXIES`; when an account hits its daily limit the pool rotates to the next proxy (a new exit IP gives a fresh quota) instead of stopping.
 
 ## Notes

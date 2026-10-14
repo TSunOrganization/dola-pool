@@ -292,8 +292,9 @@ F:\ai\视频逆向\dola-pool\
 
 Background: with the Dola **skill** system (attaching a `skill.md` together with the prompt) the Seedance 2.5 / 30s path is unlocked and an account is no longer capped at the free 2 videos/day — it can produce up to ~10. The quota is tied to the **egress IP**, so switching the VPN server / proxy resets an account's budget.
 
-- API: `VideoGenRequest` gains `skill_markdown: str | None`. `media.resolve_skill_markdown()` returns the request value, or falls back to `config.SKILL_FILE` (`DOLA_SKILL_FILE`, default `skills/skill.md`) when `DOLA_SKILL_ENABLED=1`.
-- `_run_task` writes the skill to a temporary `skill.md` (`media.write_skill_markdown`) and passes `skill_path` into `video_worker_ui.generate_video`, which attaches it through Dola's native file input together with the reference images (`attach_reference_images(..., extra_files=[skill_path])`). The temp directory is removed in `finally`.
+- Primary path is a ready-made file: drop your `skill.md` at `config.SKILL_FILE` (`DOLA_SKILL_FILE`, default `skills/skill.md`). `media.resolve_skill_path(None, task_id)` returns that path and it is attached **directly** (no copy, nothing to clean up).
+- API: `VideoGenRequest` also accepts `skill_markdown: str | None` as an override; `media.resolve_skill_path(skill_markdown, task_id)` writes it to a temporary `skill.md` and returns the temp root for cleanup. `DOLA_SKILL_ENABLED=0` disables attaching any skill.
+- `_run_task` resolves the skill via `media.resolve_skill_path` and passes `skill_path` into `video_worker_ui.generate_video`, which attaches it through Dola's native file input together with the reference images (`attach_reference_images(..., extra_files=[skill_path])`). Any temporary skill directory is removed in `finally`.
 - `store.tasks` gains a `skill_markdown` column (with an ALTER migration) so a restart can re-attach the skill when resuming queued tasks.
 - Daily quota is now `config.DAILY_LIMIT` (`DOLA_DAILY_LIMIT`, default `2`; set `10` in skill mode) instead of the hard-coded 2.
 - `BrowserPool` tracks usage per `(account, day, proxy)`; the `usage` table is migrated in place to add the `proxy` column. Egress proxies come from `config.PROXIES` (`DOLA_PROXIES`, comma-separated; falls back to the single `DOLA_PROXY`).

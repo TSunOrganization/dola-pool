@@ -24,7 +24,7 @@ from pydantic import BaseModel, Field
 import config
 from add_account import add_account_flow
 from browser_pool import AllAccountsLimitedError, AllAccountsQuotaBlockedError, BrowserPool
-from media import download_reference_images, resolve_skill_markdown, validate_reference_urls, write_skill_markdown
+from media import download_reference_images, resolve_skill_path, validate_reference_urls
 from store import PendingTaskLimitExceeded, TaskQuotaExceeded, TaskStore
 
 Path(config.DOWNLOAD_DIR).mkdir(parents=True, exist_ok=True)
@@ -201,11 +201,8 @@ async def _run_task(task_id, model, prompt, ratio, duration, reference_images, c
 
         reference_root, reference_paths = await download_reference_images(
             reference_images or [], task_id)
-        skill_path = None
-        if skill_markdown:
-            skill_file = write_skill_markdown(skill_markdown, task_id)
-            skill_path = str(skill_file)
-            skill_root = skill_file.parent
+        skill_file, skill_root = resolve_skill_path(skill_markdown, task_id)
+        skill_path = str(skill_file) if skill_file else None
         result = await pool.generate_video(
             prompt, ratio, duration, model,
             on_conversation_id=on_conversation_id, on_poll=on_poll,
@@ -315,7 +312,7 @@ async def create_video(req: VideoGenRequest, authorization: str | None = Header(
         reference_images = await validate_reference_urls(req.reference_images)
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
-    skill_markdown = resolve_skill_markdown(req.skill_markdown)
+    skill_markdown = req.skill_markdown
     # When accounts are temporarily busy, allow the task to enter queued; actual queuing is handled
     # by BrowserPool's global concurrency control. Reject immediately only when it is clear that all
     # accounts have hit the daily limit / have insufficient credits.

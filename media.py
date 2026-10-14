@@ -174,12 +174,22 @@ def write_skill_markdown(skill_markdown: str, task_id: str) -> Path:
     return path
 
 
-def resolve_skill_markdown(skill_markdown: str | None) -> str | None:
-    """Return the skill markdown to use: the request value, or the configured default file."""
+def default_skill_path() -> Path | None:
+    """Return the ready-made skill file (config.SKILL_FILE) when skill mode is on and the file exists."""
+    if not config.SKILL_ENABLED:
+        return None
+    path = Path(config.SKILL_FILE)
+    return path if path.exists() else None
+
+
+def resolve_skill_path(skill_markdown: str | None, task_id: str) -> tuple[Path | None, Path | None]:
+    """Return (skill_file, temp_root_to_cleanup) for a task.
+
+    An inline skill_markdown is written to a temporary skill.md (the caller must
+    delete `temp_root`). Otherwise the ready-made file at config.SKILL_FILE is
+    attached directly, so no copy is made and nothing needs cleaning up.
+    """
     if skill_markdown:
-        return skill_markdown
-    if config.SKILL_ENABLED:
-        default = Path(config.SKILL_FILE)
-        if default.exists():
-            return default.read_text(encoding="utf-8")
-    return None
+        path = write_skill_markdown(skill_markdown, task_id)
+        return path, path.parent
+    return default_skill_path(), None
